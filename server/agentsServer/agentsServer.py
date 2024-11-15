@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS, cross_origin
 from randomAgents.model import RandomModel
-from randomAgents.agent import CarAgent, ObstacleAgent
+from randomAgents.agent import RandomAgent, ObstacleAgent
 
 #Size of the board
 number_agents = 10
@@ -19,7 +19,8 @@ cors = CORS(app, origins=['http://localhost'])
 @app.route('/init', methods=['POST'])
 @cross_origin()
 def initModel():
-    global currentStep, trafficModel, agentsNumber, width, height
+    
+    global currentStep, RandomModel, agentsNumber, width, height
 
     if request.method == 'POST':
         try:
@@ -34,7 +35,7 @@ def initModel():
             print('Model parameters: ', {agentsNumber, width, height})
 
             # Create the model using the parameters sent by the application
-            trafficmodel = TrafficModel(agentsModel, width, height)
+            randomModel = RandomModel(agentsNumber, width, height)
 
             return jsonify
             ({"message":"parameters recived, model initiated."})
@@ -49,12 +50,12 @@ def initModel():
 @app.route('/getAgents', methods =['GET'])
 @cross_origin()
 def getAgents():
-    global trafficModel
+    global randomModel
 
     if request.method == 'GET':
         try:
             agentPositions = [{"id": str(a.unique_id), "x": x, "y": 1, "z": z}
-            for a, (x,z) in trafficModel.grid.coord_iter()
+            for a, (x,z) in randomModel.grid.coord_iter()
             if isinstance(a, CarAgent)
             ]        
 
@@ -70,7 +71,7 @@ def getAgents():
 @cross_origin()
 
 def getObstacles():
-    global trafficModel
+    global randomModel
 
     if request.method == 'GET':
         try:
@@ -79,7 +80,7 @@ def getObstacles():
                 "x": x, 
                 "y":1, 
                 "z":z}
-                for a, (x,z) in trafficModel.grid.coord_iter() if isinstance(a, ObstacleAgent)
+                for a, (x,z) in randomModel.grid.coord_iter() if isinstance(a, ObstacleAgent)
             ]
 
             return jsonify({'positions':carPositions})
@@ -91,10 +92,10 @@ def getObstacles():
 @app.route('/update', methods=['GET'])
 @cross_origin()
 def updateModel():
-    global currentStep, trafficModel
+    global currentStep, randomModel
     if request.method == 'GET':
         try:
-            trafficModel.step()
+            randomModel.step()
             currentStep += 1
             return jsonify
             ({'message':f'Model updated to step {currentStep}.', 'currentStep':currentStep})
