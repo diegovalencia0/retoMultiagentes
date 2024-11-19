@@ -1,44 +1,68 @@
-from mesa import Model, agent
+from mesa import Model
 from mesa.time import RandomActivation
 from mesa.space import SingleGrid
-from .agent import RandomAgent, ObstacleAgent
+from .agentsAgent import CarAgent, ObstacleAgent
 
 
-class RandomModel(Model):
-
-    def __init__(self, N, width, height):
-
-        super().__init__(seed=42)
+class CityModel(Model):
+    """
+    City traffic simulation model.
+    """
+    def __init__(self, N, width, height, map_data):
+        super().__init__()
         self.num_agents = N
-
-        self.grid = SingleGrid(width, height, torus = False)
-
+        self.grid = SingleGrid(width, height, torus=False)
         self.schedule = RandomActivation(self)
-
         self.running = True
 
-        border = [(x,y) for y in range(height) for x in range(width) if y in [0, height-1] or x in [0, width - 1]]
+        self.map_data = map_data  # Map structure as a list of strings
+        self.valid_directions = {
+            "Up": ["^", "D"],
+            "Down": ["v", "D"],
+            "Left": ["<", "D"],
+            "Right": [">", "D"]
+        }
 
-        #Ad obstacles to the grid
-        for i, pos in enumerate(border):
-            obs = ObstacleAgent(f"o-{i+1000}",self)
-            self.grid.place_agent(obs, pos)
+        self.initialize_environment()
 
-        #Function to generate random
-        pos_gen = lambda w, h: (self.random.randrange(w), self.random.randrange(h))
+    def initialize_environment(self):
+        """
+        Initialize the grid based on map data.
+        """
+        for y, row in enumerate(self.map_data):
+            for x, cell in enumerate(row):
+                if cell == "#":
+                    obs = ObstacleAgent(f"o-{x}-{y}", self)
+                    self.grid.place_agent(obs, (x, y))
+                elif cell == "S":
+                    # Spawns can be handled here if needed
+                    pass
 
-
+        # Add initial car agents
         for i in range(self.num_agents):
+            start_positions = [
+                (x, y) for y, row in enumerate(self.map_data) for x, cell in enumerate(row) if cell == "s"
+            ]
+            pos = self.random.choice(start_positions)
+            direction = self.get_initial_direction(pos)
+            car = CarAgent(f"car-{i}", self, direction=direction)
+            self.grid.place_agent(car, pos)
+            self.schedule.add(car)
 
-            a = RandomAgent(f"a-{i+1000}", self) 
-            self.schedule.add(a)
-
-            pos = pos_gen(self.grid.width, self.grid.width)
-
-            while (not self.grid.is_cell_empty(pos)):
-                pos = pos_gen(self.grid.width, self.grid.height)
-
-            self.grid.place_agent(a, pos)
+    def get_initial_direction(self, pos):
+        """
+        Determine initial direction based on map data.
+        """
+        x, y = pos
+        cell = self.map_data[y][x]
+        if cell == "^":
+            return "Up"
+        elif cell == "v":
+            return "Down"
+        elif cell == ">":
+            return "Right"
+        elif cell == "<":
+            return "Left"
 
     def step(self):
         self.schedule.step()
