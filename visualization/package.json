@@ -1,11 +1,19 @@
 {
-  "name": "visualization",
+  "name": "WebGL",
   "version": "1.0.0",
-  "main": "visualiaztion.js",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": ""
+  "dependencies": {
+    "lil-gui": "^0.19.2",
+    "twgl.js": "^5.5.4",
+    "vite": "^5.3.4"
+  }
 }
+
