@@ -48,7 +48,6 @@ class CarAgent(Agent):
             if self.model.map_data[y][x] == "D":
                 self.destination_reached = True
                 self.model.schedule.remove(self)
-
     def step(self):
         self.move()
 
