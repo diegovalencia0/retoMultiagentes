@@ -9,8 +9,8 @@ from agentsServer.agentsAgent import CarAgent, ObstacleAgent
 
 # Size of the board:
 number_agents = 10
-# width = 28
-# height = 28
+width = 28
+height = 28
 cityModel = None
 currentStep = 0
 
@@ -20,8 +20,6 @@ cors = CORS(app, origins=['http://localhost'])
 
 # This route will be used to send the parameters of the simulation to the server.
 # The servers expects a POST request with the parameters in a.json.
-import json
-
 @app.route('/init', methods=['POST'])
 @cross_origin()
 def initModel():
@@ -29,21 +27,24 @@ def initModel():
 
     if request.method == 'POST':
         try:
+
             number_agents = int(request.json.get('NAgents'))
             width = int(request.json.get('width'))
             height = int(request.json.get('height'))
-            map_path = request.json.get('mapPath')  # Path to map file
             currentStep = 0
 
-            with open(map_path, 'r') as file:
-                map_data = json.load(file)["map"]
+            print(request.json)
+            print(f"Model parameters:{number_agents, width, height}")
 
-            cityModel = CityModel(number_agents, width, height, map_data)
+            # Create the model using the parameters sent by the application
+            cityModel = CityModel(number_agents, width, height)
 
-            return jsonify({"message": "Parameters received, model initiated."})
+            # Return a message to saying that the model was created successfully
+            return jsonify({"message":"Parameters recieved, model initiated."})
+
         except Exception as e:
             print(e)
-            return jsonify({"message": "Error initializing the model"}), 500
+            return jsonify({"message":"Erorr initializing the model"}), 500
 
 # This route will be used to get the positions of the agents
 @app.route('/getAgents', methods=['GET'])

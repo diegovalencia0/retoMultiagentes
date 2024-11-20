@@ -152,7 +152,7 @@ async function main() {
 
   programInfo = twgl.createProgramInfo(gl, [vsGLSL, fsGLSL]);
 
-  const jsonData = await fetch('coche.obj').then(response => response.text()).then(loadObj);
+  const jsonData = await fetch('/assets/coche.obj').then(response => response.text()).then(loadObj);
   obstacleArrays = generateObstacleData(1);
   
   carAgents = {
@@ -203,8 +203,7 @@ async function initAgentsModel() {
 
 /*
  * Retrieves the current positions of all agents from the agent server.
- */
-async function getAgents() {
+ */async function getAgents() {
   try {
     // Send a GET request to the agent server to retrieve the agent positions
     let response = await fetch(agent_server_uri + "getAgents") 
@@ -296,6 +295,7 @@ async function update() {
     console.log(error) 
   }
 }
+
 
 /*
  * Draws the scene by rendering the agents and obstacles.
