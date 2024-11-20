@@ -8,7 +8,7 @@ class CarAgent(Agent):
     def __init__(self, unique_id, model, direction=None):
         super().__init__(unique_id, model)
         self.steps_taken = 0
-        self.direction = direction  # Initial direction (e.g., "Up", "Down", etc.)
+        self.direction = direction  
         self.destination_reached = False
 
     def get_valid_moves(self):
@@ -17,7 +17,7 @@ class CarAgent(Agent):
         """
         possible_steps = self.model.grid.get_neighborhood(
             self.pos,
-            moore=False,  # Only allow up/down/left/right
+            moore=False,  
             include_center=False
         )
 
@@ -25,7 +25,7 @@ class CarAgent(Agent):
         for step in possible_steps:
             if self.model.grid.is_cell_empty(step):
                 x, y = step
-                cell = self.model.map_data[y][x]  # Access the map character
+                cell = self.model.map_data[y][x]  
                 if cell in self.model.valid_directions[self.direction]:
                     valid_moves.append(step)
         return valid_moves
