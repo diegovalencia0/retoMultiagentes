@@ -1,7 +1,7 @@
 from mesa import Model
 from mesa.time import RandomActivation
 from mesa.space import SingleGrid
-from .agentsAgent import CarAgent, ObstacleAgent
+from agent import CarAgent, ObstacleAgent
 
 
 class CityModel(Model):

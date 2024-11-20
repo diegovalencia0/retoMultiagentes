@@ -4,8 +4,8 @@
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS, cross_origin
-from agentsServer.agentsModel import CityModel
-from agentsServer.agentsAgent import CarAgent, ObstacleAgent
+from model import CityModel
+from agent import CarAgent, ObstacleAgent
 
 # Size of the board:
 number_agents = 10
