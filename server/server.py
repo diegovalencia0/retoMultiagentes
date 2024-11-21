@@ -1,17 +1,12 @@
-# TC2008B. Sistemas Multiagentes y Gráficas Computacionales
-# Python flask server to interact with webGL.
-# Octavio Navarro. 2024
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS, cross_origin
-from model import CityModel
+from model import RandomModel
 from agent import CarAgent, ObstacleAgent
-
 # Size of the board:
 number_agents = 10
 width = 28
 height = 28
-cityModel = None
+randomModel = None
 currentStep = 0
 
 # This application will be used to interact with WebGL
@@ -23,7 +18,7 @@ cors = CORS(app, origins=['http://localhost'])
 @app.route('/init', methods=['POST'])
 @cross_origin()
 def initModel():
-    global currentStep, cityModel, number_agents, width, height
+    global currentStep, randomModel, number_agents, width, height
 
     if request.method == 'POST':
         try:
@@ -34,23 +29,23 @@ def initModel():
             currentStep = 0
 
             print(request.json)
-            print(f"Model parameters:{number_agents, width, height}")
+            print(f"Model parameters:{number_agents, width, height, currentStep}")
 
             # Create the model using the parameters sent by the application
-            cityModel = CityModel(number_agents, width, height)
+            randomModel = randomModel(number_agents, width, height)
 
             # Return a message to saying that the model was created successfully
             return jsonify({"message":"Parameters recieved, model initiated."})
 
         except Exception as e:
-            print(e)
-            return jsonify({"message":"Erorr initializing the model"}), 500
+            print('Error initializing model: ', e)
+            return jsonify({"message":"Error initializing the model"}), 500
 
 # This route will be used to get the positions of the agents
 @app.route('/getAgents', methods=['GET'])
 @cross_origin()
 def getAgents():
-    global cityModel
+    global randomModel
 
     if request.method == 'GET':
         # Get the positions of the agents and return them to WebGL in JSON.json.t.
@@ -59,7 +54,7 @@ def getAgents():
         try:
             agentPositions = [
                 {"id": str(a.unique_id), "x": x, "y":1, "z":z}
-                for a, (x, z) in cityModel.grid.coord_iter()
+                for a, (x, z) in randomModel.grid.coord_iter()
                 if isinstance(a, CarAgent)
             ]
 
@@ -72,7 +67,7 @@ def getAgents():
 @app.route('/getObstacles', methods=['GET'])
 @cross_origin()
 def getObstacles():
-    global cityModel
+    global randomModel
 
     if request.method == 'GET':
         try:
@@ -80,7 +75,7 @@ def getObstacles():
         # Same as before, the positions are sent as a list of dictionaries, where each dictionary has the id and position of an obstacle.
             carPositions = [
                 {"id": str(a.unique_id), "x": x, "y":1, "z":z}
-                for a, (x, z) in cityModel.grid.coord_iter() if isinstance(a, ObstacleAgent)
+                for a, (x, z) in randomModel.grid.coord_iter() if isinstance(a, ObstacleAgent)
             ]
 
             return jsonify({'positions':carPositions})
@@ -92,11 +87,11 @@ def getObstacles():
 @app.route('/update', methods=['GET'])
 @cross_origin()
 def updateModel():
-    global currentStep, cityModel
+    global currentStep, randomModel
     if request.method == 'GET':
         try:
         # Update the model and return a message to WebGL saying that the model was updated successfully
-            cityModel.step()
+            randomModel.step()
             currentStep += 1
             return jsonify({'message':f'Model updated to step {currentStep}.', 'currentStep':currentStep})
         except Exception as e:

@@ -4,7 +4,7 @@ from mesa.space import MultiGrid
 from agent import CarAgent, ObstacleAgent
 
 
-class CityModel(Model):
+class RandomModel(Model):
     """ 
     Creates a new model with random agents.
     Args:
@@ -70,8 +70,8 @@ class CityModel(Model):
 
 
 
-        def step(self):
-            self.schedule.step()
+    def step(self):
+        self.schedule.step()
                     
 
 
