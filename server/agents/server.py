@@ -1,7 +1,3 @@
-# TC2008B. Sistemas Multiagentes y Gráficas Computacionales
-# Python flask server to interact with webGL.
-# Octavio Navarro. 2024
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS, cross_origin
 from model import CityModel
@@ -15,7 +11,7 @@ cityModel = None
 currentStep = 0
 
 # This application will be used to interact with WebGL
-app = Flask("Traffic example")
+app = Flask("Smart city")
 cors = CORS(app, origins=['http://localhost'])
 
 # This route will be used to send the parameters of the simulation to the server.
