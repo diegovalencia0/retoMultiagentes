@@ -1,51 +1,54 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS, cross_origin
-from model import CityModel
 from agent import *
+from model import CityModel
+from mesa.visualization import CanvasGrid
+from mesa.visualization import ModularServer
 
-number_agents = 10
-width = 28
-height = 28
-cityModel = None
-currentStep = 0
+def agent_portrayal(agent):
+    if agent is None: return
+    
+    portrayal = {"Shape": "rect",
+                 "Filled": "true",
+                 "Layer": 1,
+                 "w": 1,
+                 "h": 1
+                 }
 
-app = Flask("Traffic example")
-cors = CORS(app, origins=['http://localhost'])
+    if (isinstance(agent, RoadAgent)):
+        portrayal["Color"] = "grey"
+        portrayal["Layer"] = 0
+    
+    if (isinstance(agent, DestinationAgent)):
+        portrayal["Color"] = "lightgreen"
+        portrayal["Layer"] = 0
 
+    if (isinstance(agent, TrafficLightAgent)):
+        portrayal["Color"] = "red" if not agent.state else "green"
+        portrayal["Layer"] = 0
+        portrayal["w"] = 0.8
+        portrayal["h"] = 0.8
 
+    if (isinstance(agent, ObstacleAgent)):
+        portrayal["Color"] = "cadetblue"
+        portrayal["Layer"] = 0
+        portrayal["w"] = 0.8
+        portrayal["h"] = 0.8
 
-@app.route('/init', methods = ['POST'])
-@cross_oriigin()
-def initModel():
-    global currentStep, cityModel, number_agents, width, height
+    return portrayal
 
-    if request.method == 'POST':
-        try:
+width = 0
+height = 0
 
-            number_agents = int(request.json.get('NAgents'))
-            width = int(request.json.get('width'))
-            height = int(request.json.get('height'))
-            currentStep = 0
+with open('./cityMap.txt') as baseFile:
+    lines = baseFile.readlines()
+    width = len(lines[0])-1
+    height = len(lines)
 
-            print(request.json)
-            print(f"Model parameters:{number_agents, width, height}")
+model_params = {"N":5}
 
-            # Create the model using the parameters sent by the application
-            randomModel = RandomModel(number_agents, width, height)
+print(width, height)
+grid = CanvasGrid(agent_portrayal, width, height, 500, 500)
 
-            # Return a message to saying that the model was created successfully
-            return jsonify({"message":"Parameters recieved, model initiated."})
-
-        except Exception as e:
-            print(e)
-            return jsonify({"message":"Erorr initializing the model"}), 500
-
-
-
-
-
-
-
-if __name__=='__main__':
-    # Run the flask server in port 8585
-    app.run(host="localhost", port=8585, debug=True)
+server = ModularServer(CityModel, [grid], "Smart city", model_params)
+                       
+server.port = 8522 # The default
+server.launch()

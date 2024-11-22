@@ -51,7 +51,7 @@ const agents = [];
 const obstacles = [];
 
 // Initialize WebGL-related variables
-let gl, programInfo, carAgents, obstacleArrays, agentsBufferInfo, obstaclesBufferInfo, agentsVao, obstaclesVao;
+let gl, programInfo, agentArrays, obstacleArrays, agentsBufferInfo, obstaclesBufferInfo, agentsVao, obstaclesVao;
 
 // Define the camera position
 let cameraPosition = {x:0, y:9, z:9};
@@ -61,118 +61,42 @@ let frameCount = 0;
 
 // Define the data object
 const data = {
-  NAgents: 10,
-  width: 25,
-  height: 25
+  NAgents: 500,
+  width: 100,
+  height: 100
 };
 
-function loadObj(objContent) {
-    const jsonObject = {
-        a_position: { numComponents: 3, data: [] },
-        a_color: { numComponents: 4, data: [] },
-        a_normal: { numComponents: 3, data: [] }
-    };
-
-    const vertices = [];
-    const normals = [];
-    const faces = [];
-    let hasNormals = false;
-
-    const lines = objContent.split('\n');
-
-    lines.forEach(line => {
-        const parts = line.trim().split(/\s+/);
-        try {
-            if (parts[0] === 'vn') {
-                hasNormals = true;
-                normals.push(parts.slice(1).map(parseFloat));
-            } else if (parts[0] === 'v') {
-                vertices.push(parts.slice(1).map(parseFloat));
-            } else if (parts[0] === 'f') {
-                const face = parts.slice(1).map(v => {
-                    const [vIdx, , nIdx] = v.split('//').map(x => (x ? parseInt(x, 10) - 1 : undefined));
-                    if (vIdx >= 0 && vIdx < vertices.length) {
-                        return { vIdx, nIdx };
-                    } else {
-                        throw new Error("Índice de vértice fuera de rango");
-                    }
-                });
-                faces.push(face);
-            }
-        } catch (e) {
-            console.warn(`Error procesando línea: "${line}" - ${e.message}`);
-        }
-    });
-
-    if (!hasNormals) {
-        console.error("El archivo OBJ no contiene normales (vn). No se puede procesar.");
-        return null;
-    }
-
-    const normalizeVertices = (vertices) => {
-        let min = [Infinity, Infinity, Infinity];
-        let max = [-Infinity, -Infinity, -Infinity];
-
-        vertices.forEach(v => {
-            for (let i = 0; i < 3; i++) {
-                if (v[i] < min[i]) min[i] = v[i];
-                if (v[i] > max[i]) max[i] = v[i];
-            }
-        });
-
-        const center = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
-        const maxRange = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
-
-        return vertices.map(v => [
-            (v[0] - center[0]) / maxRange,
-            (v[1] - center[1]) / maxRange,
-            (v[2] - center[2]) / maxRange
-        ]);
-    };
-
-    const normalizedVertices = normalizeVertices(vertices);
-
-    faces.forEach(face => {
-        face.forEach(({ vIdx, nIdx }) => {
-            jsonObject.a_position.data.push(...normalizedVertices[vIdx]);
-
-            if (nIdx !== undefined && nIdx >= 0 && nIdx < normals.length) {
-                jsonObject.a_normal.data.push(...normals[nIdx]);
-            }
-        });
-    });
-
-    return jsonObject;
-}
-
-
+// Main function to initialize and run the application
 async function main() {
   const canvas = document.querySelector('canvas');
   gl = canvas.getContext('webgl2');
 
+  // Create the program information using the vertex and fragment shaders
   programInfo = twgl.createProgramInfo(gl, [vsGLSL, fsGLSL]);
 
-  const jsonData = await fetch('/assets/coche.obj').then(response => response.text()).then(loadObj);
+  // Generate the agent and obstacle data
+  agentArrays = generateData(1);
   obstacleArrays = generateObstacleData(1);
-  
-  carAgents = {
-    a_position: { numComponents: 3, data: jsonData.a_position.data },
-    a_color: { numComponents: 4, data: jsonData.a_color.data },
-    a_normal: { numComponents: 3, data: jsonData.a_normal.data }
-  }
-  agentsBufferInfo = twgl.createBufferInfoFromArrays(gl, carAgents);
+
+  // Create buffer information from the agent and obstacle data
+  agentsBufferInfo = twgl.createBufferInfoFromArrays(gl, agentArrays);
   obstaclesBufferInfo = twgl.createBufferInfoFromArrays(gl, obstacleArrays);
 
+  // Create vertex array objects (VAOs) from the buffer information
   agentsVao = twgl.createVAOFromBufferInfo(gl, programInfo, agentsBufferInfo);
   obstaclesVao = twgl.createVAOFromBufferInfo(gl, programInfo, obstaclesBufferInfo);
 
+  // Set up the user interface
   setupUI();
 
+  // Initialize the agents model
   await initAgentsModel();
 
+  // Get the agents and obstacles
   await getAgents();
   await getObstacles();
 
+  // Draw the scene
   await drawScene(gl, programInfo, agentsVao, agentsBufferInfo, obstaclesVao, obstaclesBufferInfo);
 }
 
@@ -203,7 +127,8 @@ async function initAgentsModel() {
 
 /*
  * Retrieves the current positions of all agents from the agent server.
- */async function getAgents() {
+ */
+async function getAgents() {
   try {
     // Send a GET request to the agent server to retrieve the agent positions
     let response = await fetch(agent_server_uri + "getAgents") 
@@ -295,7 +220,6 @@ async function update() {
     console.log(error) 
   }
 }
-
 
 /*
  * Draws the scene by rendering the agents and obstacles.
@@ -473,120 +397,120 @@ function setupUI() {
     const posFolder = gui.addFolder('Position:')
 
     // Add a slider for the x-axis
-    posFolder.add(cameraPosition, 'x', -100, 100)
+    posFolder.add(cameraPosition, 'x', -50, 50)
         .onChange( value => {
             // Update the camera position when the slider value changes
             cameraPosition.x = value
         });
 
     // Add a slider for the y-axis
-    posFolder.add( cameraPosition, 'y', -100, 100)
+    posFolder.add( cameraPosition, 'y', -50, 50)
         .onChange( value => {
             // Update the camera position when the slider value changes
             cameraPosition.y = value
         });
 
     // Add a slider for the z-axis
-    posFolder.add( cameraPosition, 'z', -100, 100)
+    posFolder.add( cameraPosition, 'z', -50, 50)
         .onChange( value => {
             // Update the camera position when the slider value changes
             cameraPosition.z = value
         });
 }
 
-// function generateData(size) {
-//     let arrays =
-//     {
-//         a_position: {
-//                 numComponents: 3,
-//                 data: [
-//                   // Front Face
-//                   -0.5, -0.5,  0.5,
-//                   0.5, -0.5,  0.5,
-//                   0.5,  0.5,  0.5,
-//                  -0.5,  0.5,  0.5,
+function generateData(size) {
+    let arrays =
+    {
+        a_position: {
+                numComponents: 3,
+                data: [
+                  // Front Face
+                  -0.5, -0.5,  0.5,
+                  0.5, -0.5,  0.5,
+                  0.5,  0.5,  0.5,
+                 -0.5,  0.5,  0.5,
 
-//                  // Back face
-//                  -0.5, -0.5, -0.5,
-//                  -0.5,  0.5, -0.5,
-//                   0.5,  0.5, -0.5,
-//                   0.5, -0.5, -0.5,
+                 // Back face
+                 -0.5, -0.5, -0.5,
+                 -0.5,  0.5, -0.5,
+                  0.5,  0.5, -0.5,
+                  0.5, -0.5, -0.5,
 
-//                  // Top face
-//                  -0.5,  0.5, -0.5,
-//                  -0.5,  0.5,  0.5,
-//                   0.5,  0.5,  0.5,
-//                   0.5,  0.5, -0.5,
+                 // Top face
+                 -0.5,  0.5, -0.5,
+                 -0.5,  0.5,  0.5,
+                  0.5,  0.5,  0.5,
+                  0.5,  0.5, -0.5,
 
-//                  // Bottom face
-//                  -0.5, -0.5, -0.5,
-//                   0.5, -0.5, -0.5,
-//                   0.5, -0.5,  0.5,
-//                  -0.5, -0.5,  0.5,
+                 // Bottom face
+                 -0.5, -0.5, -0.5,
+                  0.5, -0.5, -0.5,
+                  0.5, -0.5,  0.5,
+                 -0.5, -0.5,  0.5,
 
-//                  // Right face
-//                   0.5, -0.5, -0.5,
-//                   0.5,  0.5, -0.5,
-//                   0.5,  0.5,  0.5,
-//                   0.5, -0.5,  0.5,
+                 // Right face
+                  0.5, -0.5, -0.5,
+                  0.5,  0.5, -0.5,
+                  0.5,  0.5,  0.5,
+                  0.5, -0.5,  0.5,
 
-//                  // Left face
-//                  -0.5, -0.5, -0.5,
-//                  -0.5, -0.5,  0.5,
-//                  -0.5,  0.5,  0.5,
-//                  -0.5,  0.5, -0.5
-//                 ].map(e => size * e)
-//             },
-//         a_color: {
-//                 numComponents: 4,
-//                 data: [
-//                   // Front face
-//                     1, 0, 0, 1, // v_1
-//                     1, 0, 0, 1, // v_1
-//                     1, 0, 0, 1, // v_1
-//                     1, 0, 0, 1, // v_1
-//                   // Back Face
-//                     0, 1, 0, 1, // v_2
-//                     0, 1, 0, 1, // v_2
-//                     0, 1, 0, 1, // v_2
-//                     0, 1, 0, 1, // v_2
-//                   // Top Face
-//                     0, 0, 1, 1, // v_3
-//                     0, 0, 1, 1, // v_3
-//                     0, 0, 1, 1, // v_3
-//                     0, 0, 1, 1, // v_3
-//                   // Bottom Face
-//                     1, 1, 0, 1, // v_4
-//                     1, 1, 0, 1, // v_4
-//                     1, 1, 0, 1, // v_4
-//                     1, 1, 0, 1, // v_4
-//                   // Right Face
-//                     0, 1, 1, 1, // v_5
-//                     0, 1, 1, 1, // v_5
-//                     0, 1, 1, 1, // v_5
-//                     0, 1, 1, 1, // v_5
-//                   // Left Face
-//                     1, 0, 1, 1, // v_6
-//                     1, 0, 1, 1, // v_6
-//                     1, 0, 1, 1, // v_6
-//                     1, 0, 1, 1, // v_6
-//                 ]
-//             },
-//         indices: {
-//                 numComponents: 3,
-//                 data: [
-//                   0, 1, 2,      0, 2, 3,    // Front face
-//                   4, 5, 6,      4, 6, 7,    // Back face
-//                   8, 9, 10,     8, 10, 11,  // Top face
-//                   12, 13, 14,   12, 14, 15, // Bottom face
-//                   16, 17, 18,   16, 18, 19, // Right face
-//                   20, 21, 22,   20, 22, 23  // Left face
-//                 ]
-//             }
-//     };
+                 // Left face
+                 -0.5, -0.5, -0.5,
+                 -0.5, -0.5,  0.5,
+                 -0.5,  0.5,  0.5,
+                 -0.5,  0.5, -0.5
+                ].map(e => size * e)
+            },
+        a_color: {
+                numComponents: 4,
+                data: [
+                  // Front face
+                    1, 0, 0, 1, // v_1
+                    1, 0, 0, 1, // v_1
+                    1, 0, 0, 1, // v_1
+                    1, 0, 0, 1, // v_1
+                  // Back Face
+                    0, 1, 0, 1, // v_2
+                    0, 1, 0, 1, // v_2
+                    0, 1, 0, 1, // v_2
+                    0, 1, 0, 1, // v_2
+                  // Top Face
+                    0, 0, 1, 1, // v_3
+                    0, 0, 1, 1, // v_3
+                    0, 0, 1, 1, // v_3
+                    0, 0, 1, 1, // v_3
+                  // Bottom Face
+                    1, 1, 0, 1, // v_4
+                    1, 1, 0, 1, // v_4
+                    1, 1, 0, 1, // v_4
+                    1, 1, 0, 1, // v_4
+                  // Right Face
+                    0, 1, 1, 1, // v_5
+                    0, 1, 1, 1, // v_5
+                    0, 1, 1, 1, // v_5
+                    0, 1, 1, 1, // v_5
+                  // Left Face
+                    1, 0, 1, 1, // v_6
+                    1, 0, 1, 1, // v_6
+                    1, 0, 1, 1, // v_6
+                    1, 0, 1, 1, // v_6
+                ]
+            },
+        indices: {
+                numComponents: 3,
+                data: [
+                  0, 1, 2,      0, 2, 3,    // Front face
+                  4, 5, 6,      4, 6, 7,    // Back face
+                  8, 9, 10,     8, 10, 11,  // Top face
+                  12, 13, 14,   12, 14, 15, // Bottom face
+                  16, 17, 18,   16, 18, 19, // Right face
+                  20, 21, 22,   20, 22, 23  // Left face
+                ]
+            }
+    };
 
-//     return arrays;
-// }
+    return arrays;
+}
 
 function generateObstacleData(size){
 
