@@ -29,15 +29,15 @@ def initModel():
         try:
 
             number_agents = int(request.json.get('NAgents'))
-            width = int(request.json.get('width'))
-            height = int(request.json.get('height'))
+            # width = int(request.json.get('width'))
+            # height = int(request.json.get('height'))
             currentStep = 0
 
             print(request.json)
-            print(f"Model parameters:{number_agents, width, height}")
+            print(f"Model parameters:{number_agents}")
 
             # Create the model using the parameters sent by the application
-            randomModel = RandomModel(number_agents, width, height)
+            randomModel = RandomModel(number_agents)
 
             # Return a message to saying that the model was created successfully
             return jsonify({"message":"Parameters recieved, model initiated."})

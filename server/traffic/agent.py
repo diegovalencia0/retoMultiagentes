@@ -57,13 +57,24 @@ class ObstacleAgent(Agent):
 class RoadAgent(Agent):
     def __init__(self, unique_id, model):
         super().__init__(unique_id, model)
-    
+
     def step(self):
         pass  
 
+#Add logic later
 class TrafficLightAgent(Agent):
     def __init__(self, unique_id, model):
         super().__init__(unique_id, model)
-    
+
     def step(self):
         pass  
+
+class DestinationAgent(Agent):
+    def __init__(self, unique_id, model):
+        super().__init__(unique_id, model)
+
+    def step(self):
+        pass  
+
+
+
