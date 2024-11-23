@@ -145,21 +145,163 @@ function loadObj(objContent) {
     return jsonObject;
 }
 
+async function loadObjFromFile(url) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`No se pudo cargar el archivo OBJ ${url}`);
+    const objContent = await response.text();
+    return loadObj(objContent);
+  } catch (error) {
+    console.error("Error cargando el archivo OBJ:", error);
+    return null;
+  }
+}
 
+async function loadMapFromFile(url) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`No se pudo cargar el archivo ${url}`);
+    const text = await response.text();
+    return text.split("\n").map((line) => line.split(""));
+  } catch (error) {
+    console.error("Error cargando el archivo:", error);
+    return [];
+  }
+}
+async function generateGeometryFromMap(mapData) {
+  const positions = [];
+  const colors = [];
+  
+  const objects = {
+    "#": "/obj/edificio1.obj",
+    "S": "/obj/semaforo.obj",
+    "v": "/obj/cubo.obj",
+    "<": "/obj/cubo.obj",
+    ">": "/obj/cubo.obj", 
+    "^": "/obj/cubo.obj", 
+  };
+
+  const processed = Array(mapData.length)
+    .fill(false)
+    .map(() => Array(mapData[0].length).fill(false));
+
+  for (let z = 0; z < mapData.length; z++) {
+    const row = mapData[z];
+    for (let x = 0; x < row.length; x++) {
+      const cell = row[x];
+
+      if (cell === "#" && !processed[z][x]) {
+        let width = 0;
+        let height = 0;
+
+        while (x + width < row.length && mapData[z][x + width] === "#" && !processed[z][x + width]) {
+          width++;
+        }
+
+        while (
+          z + height < mapData.length &&
+          mapData[z + height].slice(x, x + width).every((c, i) => c === "#" && !processed[z + height][x + i])
+        ) {
+          height++;
+        }
+
+        for (let dz = 0; dz < height; dz++) {
+          for (let dx = 0; dx < width; dx++) {
+            processed[z + dz][x + dx] = true;
+          }
+        }
+
+        const offsetX = x + width / 2;
+        const offsetZ = z + height / 2;
+        const scaleX = width;
+        const scaleZ = height;
+        const scaleY = Math.max(1.0, Math.sqrt(width * height));
+        const offsetY = Math.max(0.5, scaleY / 2);
+
+        const objData = await loadObjFromFile(objects["#"]);
+        if (objData) {
+          for (let i = 0; i < objData.a_position.data.length; i += 3) {
+            positions.push(
+              objData.a_position.data[i] * scaleX + offsetX,
+              objData.a_position.data[i + 1] * scaleY + offsetY,
+              objData.a_position.data[i + 2] * scaleZ + offsetZ
+            );
+          }
+          colors.push(
+            ...Array(objData.a_position.data.length / 3)
+              .fill([1.0, 0.0, 0.0])
+              .flat()
+          );
+        }
+      } else if (objects[cell]) {
+        if (!processed[z][x]) {
+          const objData = await loadObjFromFile(objects[cell]);
+          let color = [1.0, 1.0, 1.0];
+
+          if (objData) {
+            const offsetX = x * 1.0;
+            const offsetZ = z * 1.0;
+            const offsetY = 0.0;
+
+            for (let i = 0; i < objData.a_position.data.length; i += 3) {
+              positions.push(
+                objData.a_position.data[i] + offsetX,
+                objData.a_position.data[i + 1] + offsetY,
+                objData.a_position.data[i + 2] + offsetZ
+              );
+            }
+
+            if (cell === "S") {
+              color = [0.4, 0.4, 0.4];
+            } else if (cell === "v" || cell === "<" || cell === ">" || cell === "^") {
+              color = [0.5, 0.5, 0.5];
+            }
+
+            colors.push(...Array(objData.a_position.data.length / 3).fill(color).flat());
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    position: new Float32Array(positions),
+    color: new Float32Array(colors),
+  };
+}
+
+let mapBufferInfo = null;
+
+async function setupMapFromFile(url) {
+  const mapData = await loadMapFromFile(url);
+  const geometryData = await generateGeometryFromMap(mapData);
+  if (geometryData) {
+    mapBufferInfo = twgl.createBufferInfoFromArrays(gl, geometryData);
+  }
+}
 async function main() {
   const canvas = document.querySelector('canvas');
   gl = canvas.getContext('webgl2');
 
   programInfo = twgl.createProgramInfo(gl, [vsGLSL, fsGLSL]);
 
-  const jsonData = await fetch('/assets/coche.obj').then(response => response.text()).then(loadObj);
+  await setupMapFromFile('map.tsx');
+  if (!mapBufferInfo) {
+    console.error("No se pudo cargar el mapa");
+    return;
+  }else{
+    console.log("Mapa cargado")
+  }
+
+  const jsonData = await fetch('/obj/coche.obj').then(response => response.text()).then(loadObj);
   obstacleArrays = generateObstacleData(1);
   
   carAgents = {
     a_position: { numComponents: 3, data: jsonData.a_position.data },
     a_color: { numComponents: 4, data: jsonData.a_color.data },
     a_normal: { numComponents: 3, data: jsonData.a_normal.data }
-  }
+  };
+
   agentsBufferInfo = twgl.createBufferInfoFromArrays(gl, carAgents);
   obstaclesBufferInfo = twgl.createBufferInfoFromArrays(gl, obstacleArrays);
 
@@ -169,10 +311,10 @@ async function main() {
   setupUI();
 
   await initAgentsModel();
-
   await getAgents();
   await getObstacles();
 
+  // Iniciar la renderización
   await drawScene(gl, programInfo, agentsVao, agentsBufferInfo, obstaclesVao, obstaclesBufferInfo);
 }
 
@@ -192,12 +334,12 @@ async function initAgentsModel() {
     if(response.ok){
       // Parse the response as JSON and log the message
       let result = await response.json()
-      console.log(result.message)
+      //console.log(result.message)
     }
       
   } catch (error) {
     // Log any errors that occur during the request
-    console.log(error)    
+    //console.log(error)    
   }
 }
 
@@ -214,7 +356,7 @@ async function initAgentsModel() {
       let result = await response.json()
 
       // Log the agent positions
-      console.log(result.positions)
+      //console.log(result.positions)
 
       // Check if the agents array is empty
       if(agents.length == 0){
@@ -224,7 +366,7 @@ async function initAgentsModel() {
           agents.push(newAgent)
         }
         // Log the agents array
-        console.log("Agents:", agents)
+        //console.log("Agents:", agents)
 
       } else {
         // Update the positions of existing agents
@@ -242,7 +384,7 @@ async function initAgentsModel() {
 
   } catch (error) {
     // Log any errors that occur during the request
-    console.log(error) 
+    //console.log(error) 
   }
 }
 
@@ -265,12 +407,12 @@ async function getObstacles() {
         obstacles.push(newObstacle)
       }
       // Log the obstacles array
-      console.log("Obstacles:", obstacles)
+      //console.log("Obstacles:", obstacles)
     }
 
   } catch (error) {
     // Log any errors that occur during the request
-    console.log(error) 
+    //console.log(error) 
   }
 }
 
@@ -287,12 +429,12 @@ async function update() {
       // Retrieve the updated agent positions
       await getAgents()
       // Log a message indicating that the agents have been updated
-      console.log("Updated agents")
+      //console.log("Updated agents")
     }
 
   } catch (error) {
     // Log any errors that occur during the request
-    console.log(error) 
+    //console.log(error) 
   }
 }
 
@@ -308,45 +450,43 @@ async function update() {
  * @param {Object} obstaclesBufferInfo - The buffer information for obstacles.
  */
 async function drawScene(gl, programInfo, agentsVao, agentsBufferInfo, obstaclesVao, obstaclesBufferInfo) {
-    // Resize the canvas to match the display size
-    twgl.resizeCanvasToDisplaySize(gl.canvas);
+  // Redimensionar y configurar el canvas
+  twgl.resizeCanvasToDisplaySize(gl.canvas);
+  gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+  gl.clearColor(0.2, 0.2, 0.2, 1);
+  gl.enable(gl.DEPTH_TEST);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    // Set the viewport to match the canvas size
-    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+  // Usar el programa de shaders
+  gl.useProgram(programInfo.program);
 
-    // Set the clear color and enable depth testing
-    gl.clearColor(0.2, 0.2, 0.2, 1);
-    gl.enable(gl.DEPTH_TEST);
+  // Matriz de vista-proyección
+  const viewProjectionMatrix = setupWorldView(gl);
 
-    // Clear the color and depth buffers
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  // Dibujar el mapa si existe
+  if (mapBufferInfo) {
+    twgl.setBuffersAndAttributes(gl, programInfo, mapBufferInfo);
+    twgl.setUniforms(programInfo, { u_viewProjection: viewProjectionMatrix });
+    twgl.drawBufferInfo(gl, mapBufferInfo);
+  }
 
-    // Use the program
-    gl.useProgram(programInfo.program);
+  // Dibujar agentes
+  drawAgents(1, agentsVao, agentsBufferInfo, viewProjectionMatrix);
 
-    // Set up the view-projection matrix
-    const viewProjectionMatrix = setupWorldView(gl);
+  // Dibujar obstáculos
+  // drawObstacles(1, obstaclesVao, obstaclesBufferInfo, viewProjectionMatrix);
 
-    // Set the distance for rendering
-    const distance = 1
+  // Incrementar contador de fotogramas
+  frameCount++;
+  if (frameCount % 30 === 0) {
+    frameCount = 0;
+    await update();
+  }
 
-    // Draw the agents
-    drawAgents(distance, agentsVao, agentsBufferInfo, viewProjectionMatrix)    
-    // Draw the obstacles
-    drawObstacles(distance, obstaclesVao, obstaclesBufferInfo, viewProjectionMatrix)
-
-    // Increment the frame count
-    frameCount++
-
-    // Update the scene every 30 frames
-    if(frameCount%30 == 0){
-      frameCount = 0
-      await update()
-    } 
-
-    // Request the next frame
-    requestAnimationFrame(()=>drawScene(gl, programInfo, agentsVao, agentsBufferInfo, obstaclesVao, obstaclesBufferInfo))
+  // Solicitar el siguiente frame
+  requestAnimationFrame(() => drawScene(gl, programInfo, agentsVao, agentsBufferInfo, obstaclesVao, obstaclesBufferInfo));
 }
+
 
 /*
  * Draws the agents.
