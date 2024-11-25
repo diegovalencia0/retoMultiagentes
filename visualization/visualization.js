@@ -51,7 +51,7 @@ const agents = [];
 const obstacles = [];
 
 // Initialize WebGL-related variables
-let gl, programInfo, carAgents, obstacleArrays, agentsBufferInfo, obstaclesBufferInfo, agentsVao, obstaclesVao;
+let gl, programInfo, carAgents, obstacleArrays, agentsBufferInfo, obstaclesBufferInfo, agentsVao, obstaclesVao, mapBufferInfo, mapVao;
 
 // Define the camera position
 let cameraPosition = {x:0, y:9, z:9};
@@ -62,8 +62,8 @@ let frameCount = 0;
 // Define the data object
 const data = {
   NAgents: 10,
-  width: 25,
-  height: 25
+  width: 50,
+  height: 50
 };
 
 function loadObj(objContent) {
@@ -145,6 +145,170 @@ function loadObj(objContent) {
     return jsonObject;
 }
 
+class Map3D {
+  constructor(width, height) {
+    this.width = width;
+    this.height = height;
+    this.objects = []; 
+  }
+
+  async generateGeometryFromMap(mapData, objectPaths) {
+    const processed = Array(mapData.length)
+      .fill(false)
+      .map(() => Array(mapData[0].length).fill(false));
+
+    for (let z = 0; z < mapData.length; z++) {
+      const row = mapData[z];
+      for (let x = 0; x < row.length; x++) {
+        const cell = row[x];
+
+        if (cell === "#" && !processed[z][x]) {
+          let width = 0;
+          let height = 0;
+
+          while (x + width < row.length && mapData[z][x + width] === "#" && !processed[z][x + width]) {
+            width++;
+          }
+
+          while (
+            z + height < mapData.length &&
+            mapData[z + height].slice(x, x + width).every((c, i) => c === "#" && !processed[z + height][x + i])
+          ) {
+            height++;
+          }
+
+          for (let dz = 0; dz < height; dz++) {
+            for (let dx = 0; dx < width; dx++) {
+              processed[z + dz][x + dx] = true;
+            }
+          }
+
+          const offsetX = x + width / 2;
+          const offsetZ = z + height / 2;
+          const scaleX = width;
+          const scaleZ = height;
+          const scaleY = Math.max(1.0, Math.sqrt(width * height));
+          const offsetY = .5 * scaleY;
+
+          const objPath = objectPaths["#"];
+          const objData = await loadObjFromFile(objPath);
+
+          if (objData) {
+            const obstacle = new Object3D(
+              `obstacle-${x}-${z}`,
+              [offsetX, offsetY, offsetZ],
+              [0.5, 0.5, 0.5, 1.0] // Color gris
+            );
+            obstacle.objData = objData; // Guardar datos OBJ
+            obstacle.scale = [scaleX, scaleY, scaleZ]; // Escalar correctamente
+            this.objects.push(obstacle);
+          }
+        } else if (objectPaths[cell]) {
+          if (!processed[z][x]) {
+            const objPath = objectPaths[cell];
+            const objData = await loadObjFromFile(objPath);
+            let color = [1.0, 1.0, 1.0]; // Color blanco predeterminado
+
+            if (cell === "S") {
+              color = [0.4, 0.4, 0.4]; // Semáforo gris oscuro
+            } else if (cell === "v" || cell === "<" || cell === ">" || cell === "^") {
+              color = [0.5, 0.5, 0.5]; // Agentes u objetos similares
+            }
+
+            const offsetX = x;
+            const offsetZ = z;
+            const offsetY = 0.0;
+
+            if (objData) {
+              const object = new Object3D(
+                `object-${x}-${z}`,
+                [offsetX, offsetY, offsetZ],
+                color
+              );
+              object.objData = objData;
+              this.objects.push(object);
+            }
+
+            processed[z][x] = true;
+          }
+        }
+      }
+    }
+  }
+
+  generateBuffers() {
+    const positions = [];
+    const colors = [];
+
+    this.objects.forEach((object) => {
+      const { objData, position, scale, color } = object;
+
+      if (objData) {
+        const [offsetX, offsetY, offsetZ] = position;
+        const [scaleX, scaleY, scaleZ] = scale || [1, 1, 1];
+
+        for (let i = 0; i < objData.a_position.data.length; i += 3) {
+          positions.push(
+            objData.a_position.data[i] * scaleX + offsetX,
+            objData.a_position.data[i + 1] * scaleY + offsetY,
+            objData.a_position.data[i + 2] * scaleZ + offsetZ
+          );
+        }
+
+        colors.push(
+          ...Array(objData.a_position.data.length / 3).fill(color).flat()
+        );
+      }
+    });
+
+    return {
+      position: new Float32Array(positions),
+      color: new Float32Array(colors),
+    };
+  }
+}
+
+async function setupMapFromFile(url, map3DInstance, objectPaths) {
+  const mapData = await loadMapFromFile(url);
+  if (map3DInstance && mapData.length > 0) {
+    await map3DInstance.generateGeometryFromMap(mapData, objectPaths);
+    const geometryData = map3DInstance.generateBuffers();
+
+    if (geometryData) {
+      mapBufferInfo = twgl.createBufferInfoFromArrays(gl, {
+        a_position: { numComponents: 3, data: geometryData.position },
+        a_color: { numComponents: 4, data: geometryData.color }, // Colores RGBA
+      });
+    }
+  } else {
+    console.error("No se pudo generar el mapa 3D: mapa o instancia inválidos.");
+  }
+}
+async function loadObjFromFile(url) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`No se pudo cargar el archivo OBJ ${url}`);
+    const objContent = await response.text();
+    return loadObj(objContent);
+  } catch (error) {
+    console.error("Error cargando el archivo OBJ:", error);
+    return null;
+  }
+}
+
+async function loadMapFromFile(url) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`No se pudo cargar el archivo ${url}`);
+    const text = await response.text();
+    console.log("Contenido del mapa:", text); // Depuración
+    return text.split("\n").map((line) => line.split(""));
+  } catch (error) {
+    console.error("Error cargando el archivo:", error);
+    return [];
+  }
+}
+
 
 async function main() {
   const canvas = document.querySelector('canvas');
@@ -152,28 +316,50 @@ async function main() {
 
   programInfo = twgl.createProgramInfo(gl, [vsGLSL, fsGLSL]);
 
-  const jsonData = await fetch('/assets/coche.obj').then(response => response.text()).then(loadObj);
+  // Carga del modelo del coche
+  const jsonData = await fetch('/obj/coche.obj').then(response => response.text()).then(loadObj);
   obstacleArrays = generateObstacleData(1);
-  
+
+  // Buffers de agentes (coche)
   carAgents = {
     a_position: { numComponents: 3, data: jsonData.a_position.data },
     a_color: { numComponents: 4, data: jsonData.a_color.data },
     a_normal: { numComponents: 3, data: jsonData.a_normal.data }
-  }
+  };
   agentsBufferInfo = twgl.createBufferInfoFromArrays(gl, carAgents);
-  obstaclesBufferInfo = twgl.createBufferInfoFromArrays(gl, obstacleArrays);
-
   agentsVao = twgl.createVAOFromBufferInfo(gl, programInfo, agentsBufferInfo);
+
+  // Buffers de obstáculos
+  obstaclesBufferInfo = twgl.createBufferInfoFromArrays(gl, obstacleArrays);
   obstaclesVao = twgl.createVAOFromBufferInfo(gl, programInfo, obstaclesBufferInfo);
 
+  // Carga y configuración del mapa
+  const objectPaths = {
+    "#": "/obj/edificio1.obj",
+    "S": "/obj/semaforo.obj",
+    "v": "/obj/cubo.obj",
+    "<": "/obj/cubo.obj",
+    ">": "/obj/cubo.obj",
+    "^": "/obj/cubo.obj",
+  };
+  const map3DInstance = new Map3D(); // Instancia de la clase `Map3D`
+  await setupMapFromFile('mapa.txt', map3DInstance, objectPaths);
+
+  // Crear VAO y BufferInfo para el mapa
+  mapBufferInfo = twgl.createBufferInfoFromArrays(gl, {
+    a_position: { numComponents: 3, data: map3DInstance.position },
+    a_color: { numComponents: 4, data: map3DInstance.color },
+  });
+  mapVao = twgl.createVAOFromBufferInfo(gl, programInfo, mapBufferInfo);
+
+  // Inicialización de UI y modelos
   setupUI();
-
   await initAgentsModel();
-
   await getAgents();
   await getObstacles();
 
-  await drawScene(gl, programInfo, agentsVao, agentsBufferInfo, obstaclesVao, obstaclesBufferInfo);
+  // Dibujar la escena
+  await drawScene(gl, programInfo, agentsVao, agentsBufferInfo, obstaclesVao, obstaclesBufferInfo, mapVao, mapBufferInfo);
 }
 
 /*
@@ -214,7 +400,7 @@ async function initAgentsModel() {
       let result = await response.json()
 
       // Log the agent positions
-      console.log(result.positions)
+      //console.log(result.positions)
 
       // Check if the agents array is empty
       if(agents.length == 0){
@@ -287,7 +473,7 @@ async function update() {
       // Retrieve the updated agent positions
       await getAgents()
       // Log a message indicating that the agents have been updated
-      console.log("Updated agents")
+     // console.log("Updated agents")
     }
 
   } catch (error) {
@@ -297,56 +483,52 @@ async function update() {
 }
 
 
-/*
- * Draws the scene by rendering the agents and obstacles.
- * 
- * @param {WebGLRenderingContext} gl - The WebGL rendering context.
- * @param {Object} programInfo - The program information.
- * @param {WebGLVertexArrayObject} agentsVao - The vertex array object for agents.
- * @param {Object} agentsBufferInfo - The buffer information for agents.
- * @param {WebGLVertexArrayObject} obstaclesVao - The vertex array object for obstacles.
- * @param {Object} obstaclesBufferInfo - The buffer information for obstacles.
- */
-async function drawScene(gl, programInfo, agentsVao, agentsBufferInfo, obstaclesVao, obstaclesBufferInfo) {
-    // Resize the canvas to match the display size
-    twgl.resizeCanvasToDisplaySize(gl.canvas);
 
-    // Set the viewport to match the canvas size
-    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+async function drawScene(gl, programInfo, agentsVao, agentsBufferInfo, obstaclesVao, obstaclesBufferInfo, mapVao, mapBufferInfo) {
+  // Resize del canvas y configuración básica
+  twgl.resizeCanvasToDisplaySize(gl.canvas);
+  gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+  gl.clearColor(0.2, 0.2, 0.2, 1);
+  gl.enable(gl.DEPTH_TEST);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    // Set the clear color and enable depth testing
-    gl.clearColor(0.2, 0.2, 0.2, 1);
-    gl.enable(gl.DEPTH_TEST);
+  // Usar el programa
+  gl.useProgram(programInfo.program);
 
-    // Clear the color and depth buffers
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  // Configurar matriz de vista-proyección
+  const viewProjectionMatrix = setupWorldView(gl);
 
-    // Use the program
-    gl.useProgram(programInfo.program);
+  // Distancia para renderizado
+  const distance = 1;
 
-    // Set up the view-projection matrix
-    const viewProjectionMatrix = setupWorldView(gl);
+  // Dibujar mapa (con sus respectivos buffers y VAO)
+  if (mapVao && mapBufferInfo) {
+    drawMap(distance, mapVao, mapBufferInfo, viewProjectionMatrix);
+  }
 
-    // Set the distance for rendering
-    const distance = 1
+  // Dibujar agentes (con sus respectivos buffers y VAO)
+  if (agentsVao && agentsBufferInfo) {
+    drawAgents(distance, agentsVao, agentsBufferInfo, viewProjectionMatrix);
+  }
 
-    // Draw the agents
-    drawAgents(distance, agentsVao, agentsBufferInfo, viewProjectionMatrix)    
-    // Draw the obstacles
-    drawObstacles(distance, obstaclesVao, obstaclesBufferInfo, viewProjectionMatrix)
+  // Dibujar obstáculos (con sus respectivos buffers y VAO)
+  if (obstaclesVao && obstaclesBufferInfo) {
+    drawObstacles(distance, obstaclesVao, obstaclesBufferInfo, viewProjectionMatrix);
+  }
 
-    // Increment the frame count
-    frameCount++
+  // Incrementar el contador de frames
+  frameCount++;
+  if (frameCount % 30 === 0) {
+    frameCount = 0;
+    await update(); // Actualización de estado si es necesario
+  }
 
-    // Update the scene every 30 frames
-    if(frameCount%30 == 0){
-      frameCount = 0
-      await update()
-    } 
-
-    // Request the next frame
-    requestAnimationFrame(()=>drawScene(gl, programInfo, agentsVao, agentsBufferInfo, obstaclesVao, obstaclesBufferInfo))
+  // Solicitar el siguiente frame para la animación
+  requestAnimationFrame(() =>
+    drawScene(gl, programInfo, agentsVao, agentsBufferInfo, obstaclesVao, obstaclesBufferInfo, mapVao, mapBufferInfo)
+  );
 }
+
 
 /*
  * Draws the agents.
