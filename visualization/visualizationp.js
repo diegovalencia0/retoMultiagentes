@@ -60,7 +60,6 @@ outColor = v_color;
 }
 `;
 const agent_server_uri = "http://localhost:8585/";
-
 let gl, programInfo, mapBufferInfo;
 let canvas, cameraPosition, target;
 
@@ -69,8 +68,13 @@ const cameraDelta = { x: 0, y: 10, z: 0 };
 
 
 async function initAgentsModel() {
+  const data = {
+    NAgents: 10,  // Number of agents
+    width: 28,    // Grid width
+    height: 28    // Grid height
+  }
   try {
-    let response = await fetch(agent_server_uri + "init", {
+    let response = await fetch(agent_server_uri + 'init', {
       method: 'POST', 
       headers: { 'Content-Type':'application/json' },
       body: JSON.stringify(data)
@@ -81,11 +85,65 @@ async function initAgentsModel() {
       // Parse the response as JSON and log the message
       let result = await response.json()
       console.log(result.message)
+      
     }
       
   } catch (error) {
     // Log any errors that occur during the request
-    console.log(error)    
+    console.log('Error initializing model',error)    
+  }
+}
+
+let agents = []; // Global array to store agents
+
+async function getAgents() {
+  try {
+    const response = await fetch(agent_server_uri + "getAgents");
+
+    if (response.ok) {
+      const result = await response.json();
+      const positions = result.positions;
+
+      console.log("Received agent positions:", positions);
+
+      if (positions.length === 0) {
+        console.warn("No agent positions received.");
+        return;
+      }
+
+// Initialize or update agents
+const agents = positions.map((agent) => {
+  const agentObject = {
+    id: agent.id,
+    position: [agent.x, agent.y, agent.z],
+    color: [0.0, 1.0, 0.0], // Default color for agents
+    objPath: "/obj/coches.obj", // Path for car objects
+  };
+
+  // Print the position of the current agent
+  return agentObject;
+});
+
+// Print all agents' positions after mapping
+console.log("All agent positions:", agents.map((a) => a.position));
+
+    
+      // Regenerate geometry with updated agents and map
+      const mapData = await loadMapFromFile("map.txt");
+      const geometryData = await generateGeometryFromMap(mapData, agents);
+      
+      // Update WebGL buffers
+      mapBufferInfo = twgl.createBufferInfoFromArrays(gl, {
+        a_position: { numComponents: 3, data: geometryData.position },
+        a_color: { numComponents: 4, data: geometryData.color },
+      });
+
+      console.log("Agents and map geometry updated.");
+    } else {
+      console.error("Failed to fetch agents:", response.statusText);
+    }
+  } catch (error) {
+    console.error("Error in getAgents:", error);
   }
 }
 
@@ -283,36 +341,7 @@ async function generateGeometryFromMap(mapData) {
           }
         }
       }
-      else if (cell === "N") {
-        const agentOffsetY = 0.7;
-        const agentPath = "/obj/coche.obj";
-        const objDataAgent = await loadObjFromFile(agentPath);
-      
-        if (objDataAgent) {
-          for (let i = 0; i < objDataAgent.a_position.data.length; i += 3) {
-            positions.push(
-              objDataAgent.a_position.data[i] + x,
-              objDataAgent.a_position.data[i + 1] + agentOffsetY,
-              objDataAgent.a_position.data[i + 2] + z
-            );
-          }
-          colors.push(
-            ...generateUniformColors(objDataAgent.a_position.data.length / 3, agentColor)
-          );
-        }
-      
-        const objDataCube = await loadObjFromFile(objects["N"].path);
-        if (objDataCube) {
-          for (let i = 0; i < objDataCube.a_position.data.length; i += 3) {
-            positions.push(
-              objDataCube.a_position.data[i] + x,
-              objDataCube.a_position.data[i + 1] - 1, 
-              objDataCube.a_position.data[i + 2] + z
-            );
-          }
-          colors.push(...generateUniformColors(objDataCube.a_position.data.length / 3, objects["N"].color));
-        }
-      } else if (cell === "S") {
+      else if (cell === "S") {
         const objDataTrafficLight = await loadObjFromFile(objects["S"].path);
         if (objDataTrafficLight) {
           for (let i = 0; i < objDataTrafficLight.a_position.data.length; i += 3) {
@@ -359,6 +388,22 @@ async function generateGeometryFromMap(mapData) {
       }
     }
   }
+  for (const agent of agents) {
+    const { position, color, objPath } = agent;
+    const [x, y, z] = position;
+
+    const objDataAgent = await loadObjFromFile(objPath || objects["N"].path);
+    if (objDataAgent) {
+      for (let i = 0; i < objDataAgent.a_position.data.length; i += 3) {
+        positions.push(
+          objDataAgent.a_position.data[i] + x,
+          objDataAgent.a_position.data[i + 1] + y,
+          objDataAgent.a_position.data[i + 2] + z
+        );
+      }
+      colors.push(...generateUniformColors(objDataAgent.a_position.data.length / 3, color || agentColor));
+    }
+  }
 
   return {
     position: new Float32Array(positions),
@@ -387,53 +432,6 @@ async function setupMapFromFile(url) {
     });
   }
 }
-
-async function getAgents() {
-  try {
-    const response = await fetch(agent_server_uri + "getAgents");
-    if (response.ok) {
-      const result = await response.json();
-      const positions = result.positions;
-
-      if (positions.length === 0) {
-        console.warn("No se recibieron posiciones de agentes.");
-        return;
-      }
-
-      
-
-      const mapWidth = Math.sqrt(mapBufferInfo.a_position.data.length / 3);
-      const mapHeight = mapWidth;
-
-      const agents = [];
-      for (let i = 0; i < positions.length; i++) {
-        const agent = positions[i];
-        const x = Math.floor(agent.position[0]);
-        const z = Math.floor(agent.position[2]);
-
-        const y = getTerrainHeight(x, z, mapWidth, mapBufferInfo);
-
-        if (x >= 0 && x < mapWidth && z >= 0 && z < mapHeight) {
-          const agentObject = {
-            id: agent.id || `agent_${i}`,
-            position: [x, y, z],
-            color: [0.0, 1.0, 0.0],
-            objPath: "/obj/coche.obj",
-          };
-
-          agents.push(agentObject);
-          drawAgent(agentObject); 
-        }
-      }
-
-      console.log("Agentes ubicados:", agents);
-    } else {
-      console.error("Error al obtener agentes:", response.statusText);
-    }
-  } catch (error) {
-    console.error("Error en getAgents:", error);
-  }
-}np
 
 function getTerrainHeight(x, z, mapWidth, mapBufferInfo) {
   const index = (z * mapWidth + x) * 3; 

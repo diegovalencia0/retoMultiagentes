@@ -4,14 +4,14 @@
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS, cross_origin
-from randomAgents.model import RandomModel
-from randomAgents.agent import RandomAgent, ObstacleAgent
+from model import CityModel
+from agent import *
 
 # Size of the board:
 number_agents = 10
 width = 28
 height = 28
-randomModel = None
+cityModel = None
 currentStep = 0
 
 # This application will be used to interact with WebGL
@@ -23,56 +23,62 @@ cors = CORS(app, origins=['http://localhost'])
 @app.route('/init', methods=['POST'])
 @cross_origin()
 def initModel():
-    global currentStep, randomModel, number_agents, width, height
-
+    print('Initializing model')
+    global currentStep, cityModel, number_agents, width, height
     if request.method == 'POST':
         try:
-
             number_agents = int(request.json.get('NAgents'))
             width = int(request.json.get('width'))
             height = int(request.json.get('height'))
             currentStep = 0
 
             print(request.json)
-            print(f"Model parameters:{number_agents, width, height}")
+            print(f"Model parameters: {number_agents, width, height}")
 
-            # Create the model using the parameters sent by the application
-            randomModel = RandomModel(number_agents, width, height)
+            # Create the CityModel using the parameters sent by the application
+            cityModel = CityModel(number_agents)
 
-            # Return a message to saying that the model was created successfully
-            return jsonify({"message":"Parameters recieved, model initiated."})
-
+            return jsonify({"message": "Parameters received, model initiated."})
         except Exception as e:
             print(e)
-            return jsonify({"message":"Erorr initializing the model"}), 500
+            return jsonify({"message": "Error initializing the model"}), 500
+
 
 # This route will be used to get the positions of the agents
 @app.route('/getAgents', methods=['GET'])
 @cross_origin()
 def getAgents():
-    global randomModel
+    print('/getAgents request')
+
+    global cityModel  # Ensure cityModel is available globally
 
     if request.method == 'GET':
-        # Get the positions of the agents and return them to WebGL in JSON.json.t.
-        # Note that the positions are sent as a list of dictionaries, where each dictionary has the id and position of an agent.
-        # The y coordinate is set to 1, since the agents are in a 3D world. The z coordinate corresponds to the row (y coordinate) of the grid in mesa.
         try:
-            agentPositions = [
-                {"id": str(a.unique_id), "x": x, "y":1, "z":z}
-                for a, (x, z) in randomModel.grid.coord_iter()
-                if isinstance(a, RandomAgent)
-            ]
+            # Get the positions of the Car agents
+            agent_positions = []
+            for contents, (x, y) in cityModel.grid.coord_iter():
+                for agent in contents:
+                    if isinstance(agent, Car):
+                        # Append agent's ID and position
+                        agent_positions.append({
+                            "id": str(agent.unique_id),
+                            "x": x,
+                            "y": 1,  
+                            "z": y  
+                        })
 
-            return jsonify({'positions':agentPositions})
+            print(agent_positions)
+            return jsonify({"positions": agent_positions})
         except Exception as e:
-            print(e)
-            return jsonify({"message":"Error with the agent positions"}), 500
+            print(f"Error: {e}")
+            return jsonify({"message": "Error with the agent positions"}), 500
+
 
 # This route will be used to get the positions of the obstacles
 @app.route('/getObstacles', methods=['GET'])
 @cross_origin()
 def getObstacles():
-    global randomModel
+    global cityModel
 
     if request.method == 'GET':
         try:
@@ -80,7 +86,7 @@ def getObstacles():
         # Same as before, the positions are sent as a list of dictionaries, where each dictionary has the id and position of an obstacle.
             carPositions = [
                 {"id": str(a.unique_id), "x": x, "y":1, "z":z}
-                for a, (x, z) in randomModel.grid.coord_iter() if isinstance(a, ObstacleAgent)
+                for a, (x, z) in cityModel.grid.coord_iter() if isinstance(a, ObstacleAgent)
             ]
 
             return jsonify({'positions':carPositions})
@@ -92,11 +98,11 @@ def getObstacles():
 @app.route('/update', methods=['GET'])
 @cross_origin()
 def updateModel():
-    global currentStep, randomModel
+    global currentStep, cityModel
     if request.method == 'GET':
         try:
         # Update the model and return a message to WebGL saying that the model was updated successfully
-            randomModel.step()
+            cityModel.step()
             currentStep += 1
             return jsonify({'message':f'Model updated to step {currentStep}.', 'currentStep':currentStep})
         except Exception as e:
