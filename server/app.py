@@ -4,8 +4,8 @@
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS, cross_origin
-from traffic.model import RandomModel
-from traffic.agent import *
+from randomAgents.model import RandomModel
+from randomAgents.agent import RandomAgent, ObstacleAgent
 
 # Size of the board:
 number_agents = 10
@@ -29,15 +29,15 @@ def initModel():
         try:
 
             number_agents = int(request.json.get('NAgents'))
-            # width = int(request.json.get('width'))
-            # height = int(request.json.get('height'))
+            width = int(request.json.get('width'))
+            height = int(request.json.get('height'))
             currentStep = 0
 
             print(request.json)
-            print(f"Model parameters:{number_agents}")
+            print(f"Model parameters:{number_agents, width, height}")
 
             # Create the model using the parameters sent by the application
-            randomModel = RandomModel(number_agents)
+            randomModel = RandomModel(number_agents, width, height)
 
             # Return a message to saying that the model was created successfully
             return jsonify({"message":"Parameters recieved, model initiated."})
