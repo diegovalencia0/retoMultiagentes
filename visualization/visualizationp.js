@@ -60,7 +60,6 @@ outColor = v_color;
 }
 `;
 const agent_server_uri = "http://localhost:8585/";
-
 let gl, programInfo, mapBufferInfo;
 let canvas, cameraPosition, target;
 
@@ -69,8 +68,13 @@ const cameraDelta = { x: 0, y: 10, z: 0 };
 
 
 async function initAgentsModel() {
+  const data = {
+    NAgents: 10, 
+    width: 28,   
+    height: 28   
+  }
   try {
-    let response = await fetch(agent_server_uri + "init", {
+    let response = await fetch(agent_server_uri + 'init', {
       method: 'POST', 
       headers: { 'Content-Type':'application/json' },
       body: JSON.stringify(data)
@@ -81,13 +85,56 @@ async function initAgentsModel() {
       // Parse the response as JSON and log the message
       let result = await response.json()
       console.log(result.message)
+      
     }
       
   } catch (error) {
     // Log any errors that occur during the request
-    console.log(error)    
+    console.log('Error initializing model',error)    
   }
 }
+
+let agents = []; 
+async function getAgents() {
+  try {
+    const response = await fetch(agent_server_uri + "getAgents");
+    if (response.ok) {
+      const result = await response.json();
+      const positions = result.positions;
+
+      if (positions.length === 0) {
+        console.warn("No agent positions received.");
+        return;
+      }
+
+      // Limpia la lista de agentes antes de recargar
+      agents = [];
+
+      for (const agentData of positions) {
+        const agent = {
+          id: agentData.id,
+          position: [agentData.x, agentData.y, agentData.z],
+          color: [0.0, 1.0, 0.0], // Default color
+          objPath: "/obj/coche.obj",
+          bufferInfo: null, // Se inicializa vacío
+          loaded: false, // Indicador de carga
+        };
+      
+        await drawAgent(agent); // Prepara el modelo y asigna el buffer
+        agents.push(agent); // Agregar el agente a la lista
+      }
+      
+
+      console.log("Agents loaded and models prepared:", agents);
+    } else {
+      console.error("Failed to fetch agents:", response.statusText);
+    }
+  } catch (error) {
+    console.error("Error in getAgents:", error);
+  }
+}
+
+
 
 async function main() {
   canvas = document.querySelector("canvas");
@@ -160,7 +207,7 @@ function updateCameraPosition() {
 
 async function loadObjFromFile(path) {
   const objContent = await fetch(path).then(res => res.text());
-  const mtlPath = path.replace(".obj", ".mtl");
+  const mtlPath = path.replace(".obj");
 
   let mtlContent = "";
   try {
@@ -283,36 +330,7 @@ async function generateGeometryFromMap(mapData) {
           }
         }
       }
-      else if (cell === "N") {
-        const agentOffsetY = 0.7;
-        const agentPath = "/obj/coche.obj";
-        const objDataAgent = await loadObjFromFile(agentPath);
-      
-        if (objDataAgent) {
-          for (let i = 0; i < objDataAgent.a_position.data.length; i += 3) {
-            positions.push(
-              objDataAgent.a_position.data[i] + x,
-              objDataAgent.a_position.data[i + 1] + agentOffsetY,
-              objDataAgent.a_position.data[i + 2] + z
-            );
-          }
-          colors.push(
-            ...generateUniformColors(objDataAgent.a_position.data.length / 3, agentColor)
-          );
-        }
-      
-        const objDataCube = await loadObjFromFile(objects["N"].path);
-        if (objDataCube) {
-          for (let i = 0; i < objDataCube.a_position.data.length; i += 3) {
-            positions.push(
-              objDataCube.a_position.data[i] + x,
-              objDataCube.a_position.data[i + 1] - 1, 
-              objDataCube.a_position.data[i + 2] + z
-            );
-          }
-          colors.push(...generateUniformColors(objDataCube.a_position.data.length / 3, objects["N"].color));
-        }
-      } else if (cell === "S") {
+       else if (cell === "S") {
         const objDataTrafficLight = await loadObjFromFile(objects["S"].path);
         if (objDataTrafficLight) {
           for (let i = 0; i < objDataTrafficLight.a_position.data.length; i += 3) {
@@ -359,6 +377,7 @@ async function generateGeometryFromMap(mapData) {
       }
     }
   }
+  
 
   return {
     position: new Float32Array(positions),
@@ -388,53 +407,6 @@ async function setupMapFromFile(url) {
   }
 }
 
-async function getAgents() {
-  try {
-    const response = await fetch(agent_server_uri + "getAgents");
-    if (response.ok) {
-      const result = await response.json();
-      const positions = result.positions;
-
-      if (positions.length === 0) {
-        console.warn("No se recibieron posiciones de agentes.");
-        return;
-      }
-
-      
-
-      const mapWidth = Math.sqrt(mapBufferInfo.a_position.data.length / 3);
-      const mapHeight = mapWidth;
-
-      const agents = [];
-      for (let i = 0; i < positions.length; i++) {
-        const agent = positions[i];
-        const x = Math.floor(agent.position[0]);
-        const z = Math.floor(agent.position[2]);
-
-        const y = getTerrainHeight(x, z, mapWidth, mapBufferInfo);
-
-        if (x >= 0 && x < mapWidth && z >= 0 && z < mapHeight) {
-          const agentObject = {
-            id: agent.id || `agent_${i}`,
-            position: [x, y, z],
-            color: [0.0, 1.0, 0.0],
-            objPath: "/obj/coche.obj",
-          };
-
-          agents.push(agentObject);
-          drawAgent(agentObject); 
-        }
-      }
-
-      console.log("Agentes ubicados:", agents);
-    } else {
-      console.error("Error al obtener agentes:", response.statusText);
-    }
-  } catch (error) {
-    console.error("Error en getAgents:", error);
-  }
-}np
-
 function getTerrainHeight(x, z, mapWidth, mapBufferInfo) {
   const index = (z * mapWidth + x) * 3; 
 
@@ -447,14 +419,16 @@ function getTerrainHeight(x, z, mapWidth, mapBufferInfo) {
 }
 
 async function drawAgent(agent) {
-  const { position, color, objPath } = agent;
+  const { position, objPath } = agent;
 
+  // Cargar modelo desde archivo
   const objData = await loadObjFromFile(objPath);
   if (!objData) {
     console.error(`Error al cargar el modelo para el agente ${agent.id}`);
     return;
   }
 
+  // Transformar posiciones según la posición del agente
   const transformedPositions = [];
   for (let i = 0; i < objData.a_position.data.length; i += 3) {
     transformedPositions.push(
@@ -464,47 +438,35 @@ async function drawAgent(agent) {
     );
   }
 
+  // Crear geometría para el buffer
   const agentGeometry = {
     a_position: { numComponents: 3, data: new Float32Array(transformedPositions) },
     a_color: { numComponents: 4, data: new Float32Array(objData.a_color.data) },
     a_normal: { numComponents: 3, data: new Float32Array(objData.a_normal.data) },
   };
 
-  const agentBufferInfo = twgl.createBufferInfoFromArrays(gl, agentGeometry);
+  // Crear buffer TWGL y almacenarlo en el agente
+  agent.bufferInfo = twgl.createBufferInfoFromArrays(gl, agentGeometry);
 
-  gl.useProgram(programInfo.program);
-  twgl.setBuffersAndAttributes(gl, programInfo, agentBufferInfo);
-
-  const viewProjectionMatrix = twgl.m4.multiply(
-    twgl.m4.perspective(Math.PI / 4, gl.canvas.width / gl.canvas.height, 0.1, 100),
-    twgl.m4.inverse(
-      twgl.m4.lookAt(
-        [cameraPosition.x, cameraPosition.y, cameraPosition.z],
-        target,
-        [0, 1, 0]
-      )
-    )
-  );
-
-  const uniforms = {
-    u_matrix: viewProjectionMatrix,
-  };
-
-  twgl.setUniforms(programInfo, uniforms);
-  twgl.drawBufferInfo(gl, agentBufferInfo);
+  // Opcional: Puedes almacenar otros datos útiles en el objeto `agent`
+  agent.loaded = true; // Indica que el modelo ha sido cargado
 }
 
 
 function drawScene() {
+  // Actualiza la posición de la cámara
   updateCameraPosition();
 
+  // Ajusta el canvas al tamaño de la pantalla y configura WebGL
   twgl.resizeCanvasToDisplaySize(gl.canvas);
   gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+  gl.clearColor(0.2, 0.2, 0.2, 1); // Fondo gris oscuro
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
+  
   gl.enable(gl.DEPTH_TEST);
   gl.enable(gl.CULL_FACE);
 
+  // Configuración de las matrices de vista y proyección
   const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
   const projectionMatrix = twgl.m4.perspective((Math.PI / 4), aspect, 0.1, 100);
   const cameraMatrix = twgl.m4.lookAt(
@@ -515,20 +477,33 @@ function drawScene() {
   const viewMatrix = twgl.m4.inverse(cameraMatrix);
   const viewProjectionMatrix = twgl.m4.multiply(projectionMatrix, viewMatrix);
 
+  // Renderizar el mapa
   gl.useProgram(programInfo.program);
   twgl.setBuffersAndAttributes(gl, programInfo, mapBufferInfo);
-
-  const uniforms = {
-    u_matrix: viewProjectionMatrix, 
-  };
-  twgl.setUniforms(programInfo, uniforms);
+  twgl.setUniforms(programInfo, { u_matrix: viewProjectionMatrix });
   twgl.drawBufferInfo(gl, mapBufferInfo);
 
-  gl.clearColor(0.2, 0.2, 0.2, 1);
-  gl.enable(gl.DEPTH_TEST);
+  if (agents && agents.length > 0) {
+    for (const agent of agents) {
+      if (agent.loaded && agent.bufferInfo) {
+        gl.useProgram(programInfo.program);
+        twgl.setBuffersAndAttributes(gl, programInfo, agent.bufferInfo);
+  
+        const uniforms = {
+          u_matrix: viewProjectionMatrix,
+        };
+  
+        twgl.setUniforms(programInfo, uniforms);
+        twgl.drawBufferInfo(gl, agent.bufferInfo);
+      }
+    }
+  }
+  
 
+  // Llama al próximo frame
   requestAnimationFrame(drawScene);
 }
+
 
 function loadObj(objContent, mtlContent) {
   const jsonObject = {
