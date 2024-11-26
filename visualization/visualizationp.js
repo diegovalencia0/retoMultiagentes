@@ -69,9 +69,9 @@ const cameraDelta = { x: 0, y: 10, z: 0 };
 
 async function initAgentsModel() {
   const data = {
-    NAgents: 10,  // Number of agents
-    width: 28,    // Grid width
-    height: 28    // Grid height
+    NAgents: 10, 
+    width: 28,   
+    height: 28   
   }
   try {
     let response = await fetch(agent_server_uri + 'init', {
@@ -94,51 +94,38 @@ async function initAgentsModel() {
   }
 }
 
-let agents = []; // Global array to store agents
-
+let agents = []; 
 async function getAgents() {
   try {
     const response = await fetch(agent_server_uri + "getAgents");
-
     if (response.ok) {
       const result = await response.json();
       const positions = result.positions;
-
-      console.log("Received agent positions:", positions);
 
       if (positions.length === 0) {
         console.warn("No agent positions received.");
         return;
       }
 
-// Initialize or update agents
-const agents = positions.map((agent) => {
-  const agentObject = {
-    id: agent.id,
-    position: [agent.x, agent.y, agent.z],
-    color: [0.0, 1.0, 0.0], // Default color for agents
-    objPath: "/obj/coches.obj", // Path for car objects
-  };
+      // Limpia la lista de agentes antes de recargar
+      agents = [];
 
-  // Print the position of the current agent
-  return agentObject;
-});
-
-// Print all agents' positions after mapping
-console.log("All agent positions:", agents.map((a) => a.position));
-
-    
-      // Regenerate geometry with updated agents and map
-      const mapData = await loadMapFromFile("map.txt");
-      const geometryData = await generateGeometryFromMap(mapData, agents);
+      for (const agentData of positions) {
+        const agent = {
+          id: agentData.id,
+          position: [agentData.x, agentData.y, agentData.z],
+          color: [0.0, 1.0, 0.0], // Default color
+          objPath: "/obj/coche.obj",
+          bufferInfo: null, // Se inicializa vacío
+          loaded: false, // Indicador de carga
+        };
       
-      // Update WebGL buffers
-      mapBufferInfo = twgl.createBufferInfoFromArrays(gl, {
-        a_position: { numComponents: 3, data: geometryData.position },
-        a_color: { numComponents: 4, data: geometryData.color },
-      });
+        await drawAgent(agent); // Prepara el modelo y asigna el buffer
+        agents.push(agent); // Agregar el agente a la lista
+      }
+      
 
-      console.log("Agents and map geometry updated.");
+      console.log("Agents loaded and models prepared:", agents);
     } else {
       console.error("Failed to fetch agents:", response.statusText);
     }
@@ -146,6 +133,8 @@ console.log("All agent positions:", agents.map((a) => a.position));
     console.error("Error in getAgents:", error);
   }
 }
+
+
 
 async function main() {
   canvas = document.querySelector("canvas");
@@ -218,7 +207,7 @@ function updateCameraPosition() {
 
 async function loadObjFromFile(path) {
   const objContent = await fetch(path).then(res => res.text());
-  const mtlPath = path.replace(".obj", ".mtl");
+  const mtlPath = path.replace(".obj");
 
   let mtlContent = "";
   try {
@@ -341,7 +330,7 @@ async function generateGeometryFromMap(mapData) {
           }
         }
       }
-      else if (cell === "S") {
+       else if (cell === "S") {
         const objDataTrafficLight = await loadObjFromFile(objects["S"].path);
         if (objDataTrafficLight) {
           for (let i = 0; i < objDataTrafficLight.a_position.data.length; i += 3) {
@@ -388,22 +377,7 @@ async function generateGeometryFromMap(mapData) {
       }
     }
   }
-  for (const agent of agents) {
-    const { position, color, objPath } = agent;
-    const [x, y, z] = position;
-
-    const objDataAgent = await loadObjFromFile(objPath || objects["N"].path);
-    if (objDataAgent) {
-      for (let i = 0; i < objDataAgent.a_position.data.length; i += 3) {
-        positions.push(
-          objDataAgent.a_position.data[i] + x,
-          objDataAgent.a_position.data[i + 1] + y,
-          objDataAgent.a_position.data[i + 2] + z
-        );
-      }
-      colors.push(...generateUniformColors(objDataAgent.a_position.data.length / 3, color || agentColor));
-    }
-  }
+  
 
   return {
     position: new Float32Array(positions),
@@ -445,14 +419,16 @@ function getTerrainHeight(x, z, mapWidth, mapBufferInfo) {
 }
 
 async function drawAgent(agent) {
-  const { position, color, objPath } = agent;
+  const { position, objPath } = agent;
 
+  // Cargar modelo desde archivo
   const objData = await loadObjFromFile(objPath);
   if (!objData) {
     console.error(`Error al cargar el modelo para el agente ${agent.id}`);
     return;
   }
 
+  // Transformar posiciones según la posición del agente
   const transformedPositions = [];
   for (let i = 0; i < objData.a_position.data.length; i += 3) {
     transformedPositions.push(
@@ -462,47 +438,35 @@ async function drawAgent(agent) {
     );
   }
 
+  // Crear geometría para el buffer
   const agentGeometry = {
     a_position: { numComponents: 3, data: new Float32Array(transformedPositions) },
     a_color: { numComponents: 4, data: new Float32Array(objData.a_color.data) },
     a_normal: { numComponents: 3, data: new Float32Array(objData.a_normal.data) },
   };
 
-  const agentBufferInfo = twgl.createBufferInfoFromArrays(gl, agentGeometry);
+  // Crear buffer TWGL y almacenarlo en el agente
+  agent.bufferInfo = twgl.createBufferInfoFromArrays(gl, agentGeometry);
 
-  gl.useProgram(programInfo.program);
-  twgl.setBuffersAndAttributes(gl, programInfo, agentBufferInfo);
-
-  const viewProjectionMatrix = twgl.m4.multiply(
-    twgl.m4.perspective(Math.PI / 4, gl.canvas.width / gl.canvas.height, 0.1, 100),
-    twgl.m4.inverse(
-      twgl.m4.lookAt(
-        [cameraPosition.x, cameraPosition.y, cameraPosition.z],
-        target,
-        [0, 1, 0]
-      )
-    )
-  );
-
-  const uniforms = {
-    u_matrix: viewProjectionMatrix,
-  };
-
-  twgl.setUniforms(programInfo, uniforms);
-  twgl.drawBufferInfo(gl, agentBufferInfo);
+  // Opcional: Puedes almacenar otros datos útiles en el objeto `agent`
+  agent.loaded = true; // Indica que el modelo ha sido cargado
 }
 
 
 function drawScene() {
+  // Actualiza la posición de la cámara
   updateCameraPosition();
 
+  // Ajusta el canvas al tamaño de la pantalla y configura WebGL
   twgl.resizeCanvasToDisplaySize(gl.canvas);
   gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+  gl.clearColor(0.2, 0.2, 0.2, 1); // Fondo gris oscuro
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
+  
   gl.enable(gl.DEPTH_TEST);
   gl.enable(gl.CULL_FACE);
 
+  // Configuración de las matrices de vista y proyección
   const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
   const projectionMatrix = twgl.m4.perspective((Math.PI / 4), aspect, 0.1, 100);
   const cameraMatrix = twgl.m4.lookAt(
@@ -513,20 +477,33 @@ function drawScene() {
   const viewMatrix = twgl.m4.inverse(cameraMatrix);
   const viewProjectionMatrix = twgl.m4.multiply(projectionMatrix, viewMatrix);
 
+  // Renderizar el mapa
   gl.useProgram(programInfo.program);
   twgl.setBuffersAndAttributes(gl, programInfo, mapBufferInfo);
-
-  const uniforms = {
-    u_matrix: viewProjectionMatrix, 
-  };
-  twgl.setUniforms(programInfo, uniforms);
+  twgl.setUniforms(programInfo, { u_matrix: viewProjectionMatrix });
   twgl.drawBufferInfo(gl, mapBufferInfo);
 
-  gl.clearColor(0.2, 0.2, 0.2, 1);
-  gl.enable(gl.DEPTH_TEST);
+  if (agents && agents.length > 0) {
+    for (const agent of agents) {
+      if (agent.loaded && agent.bufferInfo) {
+        gl.useProgram(programInfo.program);
+        twgl.setBuffersAndAttributes(gl, programInfo, agent.bufferInfo);
+  
+        const uniforms = {
+          u_matrix: viewProjectionMatrix,
+        };
+  
+        twgl.setUniforms(programInfo, uniforms);
+        twgl.drawBufferInfo(gl, agent.bufferInfo);
+      }
+    }
+  }
+  
 
+  // Llama al próximo frame
   requestAnimationFrame(drawScene);
 }
+
 
 function loadObj(objContent, mtlContent) {
   const jsonObject = {
