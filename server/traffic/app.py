@@ -44,55 +44,41 @@ def initModel():
             return jsonify({"message": "Error initializing the model"}), 500
 
 
-# This route will be used to get the positions of the agents
 @app.route('/getAgents', methods=['GET'])
 @cross_origin()
 def getAgents():
     print('/getAgents request')
 
-    global cityModel  # Ensure cityModel is available globally
+    global cityModel  # Asegura que cityModel sea accesible globalmente
 
     if request.method == 'GET':
         try:
-            # Get the positions of the Car agents
+            # Lista para almacenar las posiciones de los agentes
             agent_positions = []
+            
+            # Iterar sobre las celdas de la cuadrícula
             for contents, (x, y) in cityModel.grid.coord_iter():
                 for agent in contents:
                     if isinstance(agent, Car):
-                        # Append agent's ID and position
+                        # Obtener el símbolo de la celda actual
+                        cell_contents = cityModel.grid.get_cell_list_contents((x, y))
+                        symbol = next((obj.symbol for obj in cell_contents if hasattr(obj, "symbol")), None)
+
+                        # Agregar la posición del agente junto con el símbolo
                         agent_positions.append({
                             "id": str(agent.unique_id),
                             "x": x,
-                            "y": 1,  
-                            "z": y  
+                            "y": .7,  # Y fijo (puedes ajustar si no es necesario)
+                            "z": y,
+                            "symbol": symbol if symbol else "?"  # Valor por defecto "?"
                         })
 
-            print(agent_positions)
+            print("Agentes encontrados:", agent_positions)
             return jsonify({"positions": agent_positions})
         except Exception as e:
-            print(f"Error: {e}")
-            return jsonify({"message": "Error with the agent positions"}), 500
+            print(f"Error al procesar las posiciones de los agentes: {e}")
+            return jsonify({"message": "Error con las posiciones de los agentes"}), 500
 
-
-# This route will be used to get the positions of the obstacles
-@app.route('/getObstacles', methods=['GET'])
-@cross_origin()
-def getObstacles():
-    global cityModel
-
-    if request.method == 'GET':
-        try:
-        # Get the positions of the obstacles and return them to WebGL in JSON.json.t.
-        # Same as before, the positions are sent as a list of dictionaries, where each dictionary has the id and position of an obstacle.
-            carPositions = [
-                {"id": str(a.unique_id), "x": x, "y":1, "z":z}
-                for a, (x, z) in cityModel.grid.coord_iter() if isinstance(a, ObstacleAgent)
-            ]
-
-            return jsonify({'positions':carPositions})
-        except Exception as e:
-            print(e)
-            return jsonify({"message":"Error with obstacle positions"}), 500
 
 # This route will be used to update the model
 @app.route('/update', methods=['GET'])
