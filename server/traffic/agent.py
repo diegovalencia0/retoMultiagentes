@@ -142,11 +142,12 @@ class Car(Agent):
 
 class Traffic_Light(Agent):
 
-    def __init__(self, unique_id, model, state=False, timeToChange=10):
+    def __init__(self, unique_id, model, state=False, timeToChange=10, direction = None):
         super().__init__(unique_id, model)
         self.state = state
         self.timeToChange = timeToChange
         self.timer = 0 
+        self.direction = direction
 
     def step(self):
         self.timer += 1
