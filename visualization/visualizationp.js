@@ -253,6 +253,7 @@ async function generateGeometryFromMap(mapData) {
     "N": { path: "/obj/cubov.obj" },
     "O": {path: "/obj/objeto.obj"},
     "A": {path: "/obj/arbol.obj"},
+    "B": {path: "/obj/banco.obj"},
   };
 
   const processed = Array(mapData.length)
@@ -268,78 +269,53 @@ async function generateGeometryFromMap(mapData) {
       if (cell === "#" && !processed[z][x]) {
         let width = 0;
         let height = 0;
-
+    
+        // Identificar la anchura del bloque horizontal de '#'
         while (x + width < row.length && mapData[z][x + width] === "#" && !processed[z][x + width]) {
-          width++;
+            width++;
         }
-
+    
+        // Identificar la altura del bloque vertical de '#'
         while (
-          z + height < mapData.length &&
-          mapData[z + height].slice(x, x + width).every((c, i) => c === "#" && !processed[z + height][x + i])
+            z + height < mapData.length &&
+            mapData[z + height].slice(x, x + width).every((c, i) => c === "#" && !processed[z + height][x + i])
         ) {
-          height++;
+            height++;
         }
-        const offsetX = x + width / 2;
-        const offsetZ = z + height / 2;
-        const scaleX = width;
-        const scaleZ = height;
-        const scaleY = Math.max(1.0, Math.sqrt(width * height));
-        const baseOffsetY = 0;
-
-        for (let dz = 0; dz < height; dz++) {
-          for (let dx = 0; dx < width; dx++) {
-            const objDataCube = await loadObjFromFile(objects["N"].path);
-            if (objDataCube) {
-              for (let i = 0; i < objDataCube.a_position.data.length; i += 3) {
-                positions.push(
-                  objDataCube.a_position.data[i] + (x + dx),
-                  objDataCube.a_position.data[i + 1] + baseOffsetY,
-                  objDataCube.a_position.data[i + 2] + (z + dz)
-                );
-              }
-              colors.push(...objDataCube.a_color.data);
+    
+        // Ignorar bloques que no formen un mínimo de 2x2
+        if (width >= 2 && height >= 2) {
+            // Limitar a un tamaño máximo de 4x4
+            const blockWidth = Math.min(width, 4);
+            const blockHeight = Math.min(height, 4);
+    
+            const offsetX = x + blockWidth / 2;
+            const offsetZ = z + blockHeight / 2;
+            const scaleX = blockWidth;
+            const scaleZ = blockHeight;
+            const scaleY = Math.max(1.0, Math.sqrt(blockWidth * blockHeight)); // Ajusta la altura del edificio
+            const baseOffsetY = 0;
+    
+            const objDataBuilding = await loadObjFromFile(objects["#"].path);
+            if (objDataBuilding) {
+                for (let i = 0; i < objDataBuilding.a_position.data.length; i += 3) {
+                    positions.push(
+                        objDataBuilding.a_position.data[i] * scaleX + offsetX,
+                        objDataBuilding.a_position.data[i + 1] * scaleY + baseOffsetY + scaleY / 2,
+                        objDataBuilding.a_position.data[i + 2] * scaleZ + offsetZ
+                    );
+                }
+                colors.push(...objDataBuilding.a_color.data);
             }
-          }
         }
-
-        
-
-        const objDataBuilding = await loadObjFromFile(objects["#"].path);
-        if (objDataBuilding) {
-          for (let i = 0; i < objDataBuilding.a_position.data.length; i += 3) {
-            positions.push(
-              objDataBuilding.a_position.data[i] * scaleX + offsetX,
-              objDataBuilding.a_position.data[i + 1] * scaleY + baseOffsetY + scaleY / 2,
-              objDataBuilding.a_position.data[i + 2] * scaleZ + offsetZ
-            );
-          }
-          colors.push(...objDataBuilding.a_color.data);
+    
+        for (let dz = 0; dz < height; dz++) {
+            for (let dx = 0; dx < width; dx++) {
+                processed[z + dz][x + dx] = true;
+            }
         }
-      } else if (cell === "S" && !processed[z][x]) {
-        const objDataTrafficLight = await loadObjFromFile(objects["S"].path);
-        if (objDataTrafficLight) {
-          for (let i = 0; i < objDataTrafficLight.a_position.data.length; i += 3) {
-            positions.push(
-              objDataTrafficLight.a_position.data[i] + x,
-              objDataTrafficLight.a_position.data[i + 1] + 1, 
-              objDataTrafficLight.a_position.data[i + 2] + z
-            );
-          }
-          colors.push(...objDataTrafficLight.a_color.data);
-        }
-
-        const objDataCube = await loadObjFromFile(objects["N"].path);
-        if (objDataCube) {
-          for (let i = 0; i < objDataCube.a_position.data.length; i += 3) {
-            positions.push(
-              objDataCube.a_position.data[i] + x,
-              objDataCube.a_position.data[i + 1],
-              objDataCube.a_position.data[i + 2] + z
-            );
-          }
-          colors.push(...objDataCube.a_color.data);
-        }
-      }else if (( cell === "v" || cell === "^") && !processed[z][x]) {
+    }
+    else if (( cell === "v" || cell === "^") && !processed[z][x]) {
         const objData = await loadObjFromFile(objects["v"].path);
         if (objData) {
           for (let i = 0; i < objData.a_position.data.length; i += 3) {
