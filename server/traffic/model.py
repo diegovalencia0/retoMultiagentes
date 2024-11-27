@@ -19,7 +19,7 @@ class CityModel(Model):
         self.num_agents = N
         self.running = True
         self.destinations = []
-        self.step_count = 0  # To track the number of steps for periodic agent initialization
+        self.step_count = 1  # To track the number of steps for periodic agent initialization
 
         # Load the map file. The map file is a text file where each character represents an agent.
         with open('../cityMap.txt') as baseFile:
@@ -51,8 +51,7 @@ class CityModel(Model):
                         agent = Destination(f"d_{r*self.width+c}", self)
                         self.grid.place_agent(agent, (c, self.height - r - 1))
                         self.destinations.append(agent)
-
-
+                        self.schedule.add(agent) 
         # Add initial agents at corners
         self.initialize_corner_agents()
 
@@ -65,11 +64,11 @@ class CityModel(Model):
             self.grid.place_agent(car, corner)
             self.schedule.add(car)
 
+
     def step(self):
         """Advance the model by one step."""
         self.step_count += 1
         # Add agents to corners every 10 steps
-        if self.step_count % 10 == 0:
+        if self.step_count  == 0:
             self.initialize_corner_agents()
-
         self.schedule.step()
