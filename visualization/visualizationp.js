@@ -90,7 +90,6 @@ async function initAgentsModel() {
 }
 
 let agents = [];
-
 async function getAgents() {
   try {
     const response = await fetch(agent_server_uri + "getAgents");
@@ -99,44 +98,85 @@ async function getAgents() {
       const positions = result.positions;
 
       if (positions.length === 0) {
-        console.warn("No se recibieron posiciones de agentes.");
+        console.warn("No agent positions received.");
         return;
       }
 
-      agents = [];
+      const updatedAgentIds = new Set();
 
       for (const agentData of positions) {
-        const direction = mapData[agentData.y]?.[agentData.x];
-        const rotation = getRotationFromDirection(direction);
+        const agentId = agentData.id;
 
-        const agent = {
-          id: agentData.id,
-          position: [agentData.x, agentData.y, agentData.z],
-          rotation: rotation, 
-          color: [0.0, 1.0, 0.0],
-          objPath: "/obj/coche.obj",
-          bufferInfo: null,
-          loaded: false,
-          symbol: agentData.symbol, 
-        };
+        // Obtener la rotación según el símbolo actual del agente
+        const rotation = getRotationFromDirection(agentData.symbol);
 
-        agents.push(agent);
+        let agent = agents.find((a) => a.id === agentId);
+
+        if (agent) {
+          // Si la posición o el símbolo (y, por ende, la rotación) ha cambiado
+          if (
+            agent.position[0] !== agentData.x ||
+            agent.position[1] !== agentData.y ||
+            agent.position[2] !== agentData.z ||
+            agent.symbol !== agentData.symbol // Ahora también verificamos el símbolo
+          ) {
+            agent.position = [agentData.x, agentData.y, agentData.z];
+            agent.symbol = agentData.symbol; // Actualizamos el símbolo
+            agent.rotation = rotation; // Actualizamos la rotación
+          }
+        } else {
+          // Crear un nuevo agente
+          agent = {
+            id: agentId,
+            position: [agentData.x, agentData.y, agentData.z],
+            rotation: rotation,
+            color: [0.0, 1.0, 0.0],
+            objPath: "/obj/coche.obj",
+            bufferInfo: null,
+            loaded: false,
+            symbol: agentData.symbol,
+          };
+
+          await drawAgent(agent);
+          agents.push(agent);
+        }
+
+        updatedAgentIds.add(agentId);
       }
 
-      await Promise.all(
-        agents.map(async (agent) => {
-          await drawAgent(agent);
-        })
-      );
+      // Eliminar agentes que ya no existen en el servidor
+      agents = agents.filter((agent) => updatedAgentIds.has(agent.id));
+      
 
-      console.log("Agentes cargados y modelos preparados:", agents);
+      console.log("Agents updated:", agents);
     } else {
-      console.error("Error al obtener agentes:", response.statusText);
+      console.error("Error fetching agents:", response.statusText);
     }
   } catch (error) {
-    console.error("Error en getAgents:", error);
+    console.error("Error in getAgents:", error);
   }
 }
+
+async function update() {
+  try {
+    const response = await fetch(agent_server_uri + "update");
+    if (response.ok) {
+      const result = await response.json();
+      console.log(result.message);
+
+      await getAgents();
+
+      // Only redraw if there are visible changes
+      drawScene();
+    } else {
+      console.error("Error during model update:", response.statusText);
+    }
+  } catch (error) {
+    console.error("Error in update:", error);
+  }
+}
+
+
 
 
 
@@ -168,6 +208,7 @@ async function main() {
 
   await initAgentsModel();
   await getAgents();
+  setInterval(update, 1000);
 
 }
 
@@ -254,6 +295,7 @@ async function generateGeometryFromMap(mapData) {
     "O": {path: "/obj/objeto.obj"},
     "A": {path: "/obj/arbol.obj"},
     "B": {path: "/obj/banco.obj"},
+    "B": {path: "/obj/banco.obj"},
   };
 
   const processed = Array(mapData.length)
@@ -269,18 +311,20 @@ async function generateGeometryFromMap(mapData) {
       if (cell === "#" && !processed[z][x]) {
         let width = 0;
         let height = 0;
-    
+        
+        // Identificar la anchura del bloque horizontal de '#'
         // Identificar la anchura del bloque horizontal de '#'
         while (x + width < row.length && mapData[z][x + width] === "#" && !processed[z][x + width]) {
-            width++;
+              width++;
         }
-    
+        
+        // Identificar la altura del bloque vertical de '#'
         // Identificar la altura del bloque vertical de '#'
         while (
-            z + height < mapData.length &&
-            mapData[z + height].slice(x, x + width).every((c, i) => c === "#" && !processed[z + height][x + i])
+              z + height < mapData.length &&
+              mapData[z + height].slice(x, x + width).every((c, i) => c === "#" && !processed[z + height][x + i])
         ) {
-            height++;
+              height++;
         }
     
         // Ignorar bloques que no formen un mínimo de 2x2
@@ -295,7 +339,21 @@ async function generateGeometryFromMap(mapData) {
             const scaleZ = blockHeight;
             const scaleY = Math.max(1.0, Math.sqrt(blockWidth * blockHeight)); // Ajusta la altura del edificio
             const baseOffsetY = 0;
-    
+            for (let dz = 0; dz < height; dz++) {
+              for (let dx = 0; dx < width; dx++) {
+                const objDataCube = await loadObjFromFile(objects["N"].path);
+                if (objDataCube) {
+                  for (let i = 0; i < objDataCube.a_position.data.length; i += 3) {
+                    positions.push(
+                      objDataCube.a_position.data[i] + (x + dx),
+                      objDataCube.a_position.data[i + 1] + baseOffsetY,
+                      objDataCube.a_position.data[i + 2] + (z + dz)
+                    );
+                  }
+                  colors.push(...objDataCube.a_color.data);
+                }
+              }
+            }
             const objDataBuilding = await loadObjFromFile(objects["#"].path);
             if (objDataBuilding) {
                 for (let i = 0; i < objDataBuilding.a_position.data.length; i += 3) {
@@ -342,6 +400,30 @@ async function generateGeometryFromMap(mapData) {
       
               
 
+      }else if (cell === "S" && !processed[z][x]) {
+        const objDataTrafficLight = await loadObjFromFile(objects["S"].path);
+        if (objDataTrafficLight) {
+          for (let i = 0; i < objDataTrafficLight.a_position.data.length; i += 3) {
+            positions.push(
+              objDataTrafficLight.a_position.data[i] + x,
+              objDataTrafficLight.a_position.data[i + 1] + 1, 
+              objDataTrafficLight.a_position.data[i + 2] + z
+            );
+          }
+          colors.push(...objDataTrafficLight.a_color.data);
+        }
+
+        const objDataCube = await loadObjFromFile(objects["N"].path);
+        if (objDataCube) {
+          for (let i = 0; i < objDataCube.a_position.data.length; i += 3) {
+            positions.push(
+              objDataCube.a_position.data[i] + x,
+              objDataCube.a_position.data[i + 1],
+              objDataCube.a_position.data[i + 2] + z
+            );
+          }
+          colors.push(...objDataCube.a_color.data);
+        }
       }else if (cell === "A" && !processed[z][x]) {
         const objDataTree = await loadObjFromFile(objects["A"].path);
         if (objDataTree) {
@@ -366,6 +448,8 @@ async function generateGeometryFromMap(mapData) {
           }
           colors.push(...objDataCube.a_color.data);
         }
+        
+
       }else if (objects[cell] && !processed[z][x]) {
         const objData = await loadObjFromFile(objects[cell].path);
 
@@ -415,10 +499,10 @@ async function setupMapFromFile(url) {
 
 function getRotationFromDirection(symbol) {
   switch (symbol) {
-    case 'v': return Math.PI; 
-    case '^': return 0;      
-    case '>': return Math.PI / 2; 
-    case '<': return -Math.PI / 2;
+    case 'v': return -Math.PI / 2;
+    case '^': return Math.PI / 2;      
+    case '>': return Math.PI;
+    case '<': return 0;
     default: return 0; 
   }
 }

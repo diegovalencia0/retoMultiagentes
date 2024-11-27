@@ -69,7 +69,7 @@ def getAgents():
                             "id": str(agent.unique_id),
                             "x": x,
                             "y": .7,  # Y fijo (puedes ajustar si no es necesario)
-                            "z": y,
+                            "z": -y +height -4,  # Invertir el eje y y ajustar la posición
                             "symbol": symbol if symbol else "?"  # Valor por defecto "?"
                         })
 
@@ -84,16 +84,22 @@ def getAgents():
 @app.route('/update', methods=['GET'])
 @cross_origin()
 def updateModel():
+    print('/update request')
     global currentStep, cityModel
     if request.method == 'GET':
+        if cityModel is None:
+            return jsonify({'message': 'Model not initialized.'}), 400
         try:
-        # Update the model and return a message to WebGL saying that the model was updated successfully
             cityModel.step()
             currentStep += 1
-            return jsonify({'message':f'Model updated to step {currentStep}.', 'currentStep':currentStep})
+            return jsonify({
+                'message': f'Model updated to step {currentStep}.',
+                'currentStep': currentStep
+            })
         except Exception as e:
-            print(e)
-            return jsonify({"message":"Error during step."}), 500
+            print(f"Error during model update: {e}")
+            return jsonify({"message": "Error during step."}), 500
+
 
 
 if __name__=='__main__':
