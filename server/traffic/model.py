@@ -70,6 +70,7 @@ class CityModel(Model):
         """Advance the model by one step."""
         self.step_count += 1
         # Add agents to corners every 10 steps
-        if self.step_count  == 0:
+        if self.step_count % 10 == 0:
             self.initialize_corner_agents()
         self.schedule.step()
+

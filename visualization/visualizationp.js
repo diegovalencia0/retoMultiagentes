@@ -99,44 +99,78 @@ async function getAgents() {
       const positions = result.positions;
 
       if (positions.length === 0) {
-        console.warn("No se recibieron posiciones de agentes.");
+        console.warn("No agent positions received.");
         return;
       }
 
-      agents = [];
+      // Create a map to track updated agents
+      const updatedAgentIds = new Set();
 
       for (const agentData of positions) {
+        const agentId = agentData.id;
         const direction = mapData[agentData.y]?.[agentData.x];
         const rotation = getRotationFromDirection(direction);
 
-        const agent = {
-          id: agentData.id,
-          position: [agentData.x, agentData.y, agentData.z],
-          rotation: rotation, 
-          color: [0.0, 1.0, 0.0],
-          objPath: "/obj/coche.obj",
-          bufferInfo: null,
-          loaded: false,
-          symbol: agentData.symbol, 
-        };
+        let agent = agents.find((a) => a.id === agentId);
 
-        agents.push(agent);
+        if (agent) {
+          // Update existing agent's position and rotation
+          agent.position = [agentData.x, agentData.y, agentData.z];
+          agent.rotation = rotation;
+          agent.symbol = agentData.symbol;
+        } else {
+          // Create new agent
+          agent = {
+            id: agentId,
+            position: [agentData.x, agentData.y, agentData.z],
+            rotation: rotation,
+            color: [0.0, 1.0, 0.0],
+            objPath: "/obj/coche.obj",
+            bufferInfo: null,
+            loaded: false,
+            symbol: agentData.symbol,
+          };
+
+          await drawAgent(agent);
+          agents.push(agent);
+        }
+
+        updatedAgentIds.add(agentId);
       }
 
-      await Promise.all(
-        agents.map(async (agent) => {
-          await drawAgent(agent);
-        })
-      );
+      // Remove agents that are no longer present
+      agents = agents.filter((agent) => updatedAgentIds.has(agent.id));
 
-      console.log("Agentes cargados y modelos preparados:", agents);
+      console.log("Agents updated:", agents);
     } else {
-      console.error("Error al obtener agentes:", response.statusText);
+      console.error("Error fetching agents:", response.statusText);
     }
   } catch (error) {
-    console.error("Error en getAgents:", error);
+    console.error("Error in getAgents:", error);
   }
 }
+
+
+
+async function update() {
+  try {
+    const response = await fetch(agent_server_uri + "update");
+    if (response.ok) {
+      const result = await response.json();
+      console.log(result.message);
+
+      await getAgents();
+
+      // Redraw the scene with updated agent positions
+      drawScene();
+    } else {
+      console.error("Error during model update:", response.statusText);
+    }
+  } catch (error) {
+    console.error("Error in update:", error);
+  }
+}
+
 
 
 
@@ -168,6 +202,7 @@ async function main() {
 
   await initAgentsModel();
   await getAgents();
+  setInterval(update, 1000);
 
 }
 
