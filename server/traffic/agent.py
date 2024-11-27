@@ -96,8 +96,19 @@ class Car(Agent):
 
     def is_valid_move(self, current_pos, next_pos):
         cell_contents = self.model.grid.get_cell_list_contents(next_pos)
-        valid_agents = [agent for agent in cell_contents if isinstance(agent, (Road, Traffic_Light, Destination))]
+        
+        # Check if the cell contains any Destination agents
+        destination_agents = [agent for agent in cell_contents if isinstance(agent, Destination)]
+        if destination_agents:
+            if self.destination in destination_agents:
+                # Allow movement into the cell if it's the car's own destination
+                return True
+            else:
+                # Disallow movement into the cell if the destination is not the car's own
+                return False
 
+        # Proceed to check for Roads and Traffic Lights
+        valid_agents = [agent for agent in cell_contents if isinstance(agent, (Road, Traffic_Light))]
         if not valid_agents:
             return False  
 
@@ -118,11 +129,6 @@ class Car(Agent):
         # Allow movement into cells with Traffic Lights
         traffic_light_agents = [agent for agent in valid_agents if isinstance(agent, Traffic_Light)]
         if traffic_light_agents:
-            return True
-
-        # Allow movement into cells with Destinations
-        destination_agents = [agent for agent in valid_agents if isinstance(agent, Destination)]
-        if destination_agents:
             return True
 
         return False  
