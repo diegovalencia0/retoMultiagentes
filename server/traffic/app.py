@@ -69,7 +69,7 @@ def getAgents():
                             "id": str(agent.unique_id),
                             "x": x,
                             "y": .7,  # Y fijo (puedes ajustar si no es necesario)
-                            "z": y,
+                            "z": -y +height -4,  # Invertir el eje y y ajustar la posición
                             "symbol": symbol if symbol else "?"  # Valor por defecto "?"
                         })
 

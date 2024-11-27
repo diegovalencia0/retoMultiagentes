@@ -90,7 +90,6 @@ async function initAgentsModel() {
 }
 
 let agents = [];
-
 async function getAgents() {
   try {
     const response = await fetch(agent_server_uri + "getAgents");
@@ -103,23 +102,30 @@ async function getAgents() {
         return;
       }
 
-      // Create a map to track updated agents
       const updatedAgentIds = new Set();
 
       for (const agentData of positions) {
         const agentId = agentData.id;
-        const direction = mapData[agentData.y]?.[agentData.x];
-        const rotation = getRotationFromDirection(direction);
+
+        // Obtener la rotación según el símbolo actual del agente
+        const rotation = getRotationFromDirection(agentData.symbol);
 
         let agent = agents.find((a) => a.id === agentId);
 
         if (agent) {
-          // Update existing agent's position and rotation
-          agent.position = [agentData.x, agentData.y, agentData.z];
-          agent.rotation = rotation;
-          agent.symbol = agentData.symbol;
+          // Si la posición o el símbolo (y, por ende, la rotación) ha cambiado
+          if (
+            agent.position[0] !== agentData.x ||
+            agent.position[1] !== agentData.y ||
+            agent.position[2] !== agentData.z ||
+            agent.symbol !== agentData.symbol // Ahora también verificamos el símbolo
+          ) {
+            agent.position = [agentData.x, agentData.y, agentData.z];
+            agent.symbol = agentData.symbol; // Actualizamos el símbolo
+            agent.rotation = rotation; // Actualizamos la rotación
+          }
         } else {
-          // Create new agent
+          // Crear un nuevo agente
           agent = {
             id: agentId,
             position: [agentData.x, agentData.y, agentData.z],
@@ -138,8 +144,9 @@ async function getAgents() {
         updatedAgentIds.add(agentId);
       }
 
-      // Remove agents that are no longer present
+      // Eliminar agentes que ya no existen en el servidor
       agents = agents.filter((agent) => updatedAgentIds.has(agent.id));
+      
 
       console.log("Agents updated:", agents);
     } else {
@@ -150,8 +157,6 @@ async function getAgents() {
   }
 }
 
-
-
 async function update() {
   try {
     const response = await fetch(agent_server_uri + "update");
@@ -161,7 +166,7 @@ async function update() {
 
       await getAgents();
 
-      // Redraw the scene with updated agent positions
+      // Only redraw if there are visible changes
       drawScene();
     } else {
       console.error("Error during model update:", response.statusText);
@@ -170,6 +175,7 @@ async function update() {
     console.error("Error in update:", error);
   }
 }
+
 
 
 
@@ -474,10 +480,10 @@ async function setupMapFromFile(url) {
 
 function getRotationFromDirection(symbol) {
   switch (symbol) {
-    case 'v': return Math.PI; 
-    case '^': return 0;      
-    case '>': return Math.PI / 2; 
-    case '<': return -Math.PI / 2;
+    case 'v': return -Math.PI / 2;
+    case '^': return Math.PI / 2;      
+    case '>': return Math.PI;
+    case '<': return 0;
     default: return 0; 
   }
 }
