@@ -20,7 +20,7 @@ class Car(Agent):
 
         print(f"BFS Start: {start}, End: {end}")
 
-        print(f"Destination contents: {self.model.grid.get_cell_list_contents(end)}")
+        # print(f"Destination contents: {self.model.grid.get_cell_list_contents(end)}")
 
         if start == end:
             print("Agent already at the destination.")
@@ -37,7 +37,7 @@ class Car(Agent):
                 print(f"BFS: Path to destination found: {path}")
                 return path
 
-            neighbors = self.model.grid.get_neighborhood(current_pos, moore=False, include_center=False)
+            neighbors = self.model.grid.get_neighborhood(current_pos, moore=True, include_center=False)
 
             for neighbor in neighbors:
                 if neighbor in visited:
@@ -160,7 +160,7 @@ class Destination(Agent):
             return
 
         cell_contents = self.model.grid.get_cell_list_contents(self.pos)
-        print(f"Destination {self.unique_id} at {self.pos}, cell contains: {[type(a) for a in cell_contents]}")
+        # print(f"Destination {self.unique_id} at {self.pos}, cell contains: {[type(a) for a in cell_contents]}")
 
         for agent in cell_contents:
             if isinstance(agent, Car) and agent.destination == self:
@@ -171,8 +171,6 @@ class Destination(Agent):
 
 
     def step(self):
-
-        print(f"Destination {self.unique_id} step method invoked.")
         self.remove_agent()
 
 
