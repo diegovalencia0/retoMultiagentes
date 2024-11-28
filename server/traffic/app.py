@@ -94,7 +94,9 @@ def updateModel():
             currentStep += 1
             return jsonify({
                 'message': f'Model updated to step {currentStep}.',
-                'currentStep': currentStep
+                'currentStep': currentStep,
+                'agentsArrived': cityModel.agentsArrived,
+                'actualAgents': cityModel.actualAgents
             })
         except Exception as e:
             print(f"Error during model update: {e}")

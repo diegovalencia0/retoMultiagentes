@@ -159,6 +159,8 @@ async function update() {
     if (response.ok) {
       const result = await response.json();
       console.log(result.message);
+      console.log(`Agents arrived: ${result.agentsArrived}`)
+      console.log(`Actual agents: ${result.actualAgents}`)
 
       await getAgents();
 
