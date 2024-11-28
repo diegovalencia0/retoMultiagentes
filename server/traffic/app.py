@@ -1,6 +1,8 @@
-# TC2008B. Sistemas Multiagentes y Gráficas Computacionales
-# Python flask server to interact with webGL.
-# Octavio Navarro. 2024
+# app.py
+# Enrique Martínez de Velasco Reyna
+# Diego Valencia Moreno
+# 11-28-2024
+
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS, cross_origin

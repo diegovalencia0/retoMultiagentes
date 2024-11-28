@@ -1,3 +1,8 @@
+# model.py
+# Enrique Martínez de Velasco Reyna
+# Diego Valencia Moreno
+# 11-28-2024
+
 from mesa import Model
 from mesa.time import RandomActivation
 from mesa.space import MultiGrid

@@ -1,4 +1,7 @@
-## DIRECTION WORKING GOOD
+# agent.py
+# Enrique Martínez de Velasco Reyna
+# Diego Valencia Moreno
+# 11-28-2024
 
 from mesa import Agent
 from collections import deque
@@ -7,9 +10,10 @@ class Car(Agent):
 
     def __init__(self, unique_id, model):
         super().__init__(unique_id, model)
-        self.waiting = False  
-        self.destination = None
+        self.waiting = False  #Variable to comunicate is at red light
+        self.destination = None #Destination cell
 
+"""Alorithm to determine the path to destination"""
     def bfs(self):
         if not self.destination or not self.pos:
             return None
@@ -17,7 +21,7 @@ class Car(Agent):
         start = self.pos
         end = self.destination.pos
 
-        if start == end:
+        if start == end: 
             return [start]
 
         queue = deque([(start, [start])])
@@ -27,7 +31,7 @@ class Car(Agent):
         while queue:
             current_pos, path = queue.popleft()
 
-            if current_pos == end:
+            if current_pos == end: #When destination is reached return [start]
                 return path
 
             neighbors = self.model.grid.get_neighborhood(current_pos, moore=True, include_center=False)
@@ -41,7 +45,7 @@ class Car(Agent):
 
                 cell_contents = self.model.grid.get_cell_list_contents(neighbor)
 
-                occupied_by_car = any(isinstance(agent, Car) for agent in cell_contents)
+                occupied_by_car = any(isinstance(agent, Car) for agent in cell_contents) #Checks if next move cell has a car
 
                 if not occupied_by_car:
                     visited.add(neighbor)
