@@ -286,12 +286,12 @@ async function generateGeometryFromMap(mapData) {
     '/obj/yellowHouse.obj'
   ];
 
-  // Function to get a random building
-  function getRandomBuilding() {
-    const randomIndex = Math.floor(Math.random() * buildings.length);
-    return buildings[randomIndex];
-  }
-
+    // Function to get a random building
+    function getRandomBuilding() {
+      const randomIndex = Math.floor(Math.random() * buildings.length);
+      return buildings[randomIndex];
+    }
+    
   const objects = {
     "#": { get path() { return getRandomBuilding(); } },
     "S": { path: "/obj/semaforo.obj" },
@@ -363,9 +363,9 @@ async function generateGeometryFromMap(mapData) {
             if (objDataBuilding) {
                 for (let i = 0; i < objDataBuilding.a_position.data.length; i += 3) {
                     positions.push(
-                        objDataBuilding.a_position.data[i] * scaleX + offsetX,
+                        objDataBuilding.a_position.data[i] * scaleX + offsetX -.4,
                         objDataBuilding.a_position.data[i + 1] * scaleY + baseOffsetY + scaleY / 2,
-                        objDataBuilding.a_position.data[i + 2] * scaleZ + offsetZ
+                        objDataBuilding.a_position.data[i + 2] * scaleZ + offsetZ -.5
                     );
                 }
                 colors.push(...objDataBuilding.a_color.data);
