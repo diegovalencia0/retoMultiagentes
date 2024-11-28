@@ -65,12 +65,35 @@ class CityModel(Model):
             self.grid.place_agent(car, corner)
             self.schedule.add(car)
 
+    def all_cells_filled_by_cars(self):
+        """Verifica si todas las celdas están llenas únicamente por agentes de tipo Car."""
+        for contents, (x, y) in self.grid.coord_iter():
+            # Verifica si la celda está vacía o no contiene ningún agente 'Car'
+            if not any(isinstance(agent, Car) for agent in contents):
+                return False
+        return True
+
+
+
 
     def step(self):
         """Advance the model by one step."""
         self.step_count += 1
-        # Add agents to corners every 10 steps
-        if self.step_count % 10 == 0:
+
+        # Añadir agentes a las esquinas cada 10 pasos
+        if self.step_count % 1 == 0:
             self.initialize_corner_agents()
+
+        # Avanzar la programación de agentes
         self.schedule.step()
+
+        # Verificar si todas las celdas están llenas por agentes Car
+        if self.all_cells_filled_by_cars():
+            print(f"Modelo detenido en el paso {self.step_count}: todas las celdas están llenas por agentes Car.")
+            self.running = False  # Detener el modelo
+
+
+
+
+
 
