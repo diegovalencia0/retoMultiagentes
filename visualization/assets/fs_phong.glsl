@@ -36,7 +36,7 @@ void main() {
     vec4 specular = vec4(0, 0, 0, 1);
     vec3 v_c_n = normalize(v_cameraDirection);
 
-    float dotForParallel = dot(v_n_n, v_l_n); // Descomentada esta línea
+    float dotForParallel = dot(v_n_n, v_l_n);
     vec3 v_parallel = v_n_n * dotForParallel;
     vec3 v_perpendicular = v_l_n - v_parallel;
 

@@ -25,44 +25,81 @@
 // }`;
 
 'use strict';
-
+// import vsGLSL from './assets/vs_phong.glsl?raw';
+// import fsGLSL from './assets/fs_phong.glsl?raw';
 import * as twgl from 'twgl.js';
 import GUI from 'lil-gui';
 
-// Define the vertex shader code, using GLSL 3.00
+
 const vsGLSL = `#version 300 es
 in vec4 a_position;
 in vec4 a_color;
-in vec3 color;
+in vec3 a_normal;
 
-
-uniform mat4 u_transforms;
-uniform mat4 u_matrix;
+uniform mat4 u_matrix;   // Matriz MVP
+uniform mat4 u_model;    // Matriz de modelo
 
 out vec4 v_color;
+out vec3 v_normal;       // Normales transformadas
+out vec3 v_position;     // Posición del vértice en espacio de cámara
 
 void main() {
-gl_Position = u_matrix * a_position;
-v_color = a_color;
+    gl_Position = u_matrix * a_position;
+    v_color = a_color;
+
+    // Transformar normales al espacio del modelo (manejo de escalado no uniforme)
+    v_normal = mat3(transpose(inverse(u_model))) * a_normal;
+
+    // Transformar posición al espacio de cámara
+    v_position = (u_model * a_position).xyz;
 }
+
 `;
 
-// Define the fragment shader code, using GLSL 3.00
 const fsGLSL = `#version 300 es
 precision highp float;
 
 in vec4 v_color;
+in vec3 v_normal;
+in vec3 v_position;
+
+uniform vec3 u_lightDirection; // Dirección de la luz (normalizada)
+uniform vec4 u_ambientLight;   // Componente de luz ambiental
+uniform vec4 u_diffuseLight;   // Componente de luz difusa
+uniform vec4 u_specularLight;  // Componente de luz especular
+uniform vec3 u_cameraPosition; // Posición de la cámara
+uniform float u_shininess;     // Brillo para cálculo especular
 
 out vec4 outColor;
 
 void main() {
-outColor = v_color;
+    // Normalizar las normales y la dirección de la luz
+    vec3 normal = normalize(v_normal);
+    vec3 lightDir = normalize(u_lightDirection);
+
+    // Componente difusa
+    float diff = max(dot(normal, lightDir), 0.0);
+    vec4 diffuse = diff * u_diffuseLight * v_color;
+
+    // Componente especular
+    vec3 viewDir = normalize(u_cameraPosition - v_position);
+    vec3 reflectDir = reflect(-lightDir, normal);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), u_shininess);
+    vec4 specular = spec * u_specularLight;
+
+    // Componente ambiental
+    vec4 ambient = u_ambientLight * v_color;
+
+    // Combinar componentes
+    outColor = ambient + diffuse + specular;
+    outColor.a = v_color.a; // Mantener el alfa original
 }
+
 `;
 const agent_server_uri = "http://localhost:8585/";
 let gl, programInfo, mapBufferInfo;
 let canvas, cameraPosition, target;
-
+let mapData = [];
 const cameraSpeed = 1; 
 const cameraDelta = { x: 0, y: 10, z: 0 };
 
@@ -80,21 +117,18 @@ async function initAgentsModel() {
       body: JSON.stringify(data)
     })
 
-    // Check if the response was successful
     if(response.ok){
-      // Parse the response as JSON and log the message
       let result = await response.json()
       console.log(result.message)
       
     }
       
   } catch (error) {
-    // Log any errors that occur during the request
     console.log('Error initializing model',error)    
   }
 }
 
-let agents = []; 
+let agents = [];
 async function getAgents() {
   try {
     const response = await fetch(agent_server_uri + "getAgents");
@@ -107,32 +141,82 @@ async function getAgents() {
         return;
       }
 
-      // Limpia la lista de agentes antes de recargar
-      agents = [];
+      const updatedAgentIds = new Set();
 
       for (const agentData of positions) {
-        const agent = {
-          id: agentData.id,
-          position: [agentData.x, agentData.y, agentData.z],
-          color: [0.0, 1.0, 0.0], // Default color
-          objPath: "/obj/coche.obj",
-          bufferInfo: null, // Se inicializa vacío
-          loaded: false, // Indicador de carga
-        };
-      
-        await drawAgent(agent); // Prepara el modelo y asigna el buffer
-        agents.push(agent); // Agregar el agente a la lista
+        const agentId = agentData.id;
+
+        // Obtener la rotación según el símbolo actual del agente
+        const rotation = getRotationFromDirection(agentData.symbol);
+
+        let agent = agents.find((a) => a.id === agentId);
+
+        if (agent) {
+          // Si la posición o el símbolo (y, por ende, la rotación) ha cambiado
+          if (
+            agent.position[0] !== agentData.x ||
+            agent.position[1] !== agentData.y ||
+            agent.position[2] !== agentData.z ||
+            agent.symbol !== agentData.symbol // Ahora también verificamos el símbolo
+          ) {
+            agent.position = [agentData.x, agentData.y, agentData.z];
+            agent.symbol = agentData.symbol; // Actualizamos el símbolo
+            agent.rotation = rotation; // Actualizamos la rotación
+          }
+        } else {
+          // Crear un nuevo agente
+          agent = {
+            id: agentId,
+            position: [agentData.x, agentData.y, agentData.z],
+            rotation: rotation,
+            color: [0.0, 1.0, 0.0],
+            objPath: "/obj/coche.obj",
+            bufferInfo: null,
+            loaded: false,
+            symbol: agentData.symbol,
+          };
+
+          await drawAgent(agent);
+          agents.push(agent);
+        }
+
+        updatedAgentIds.add(agentId);
       }
+
+      // Eliminar agentes que ya no existen en el servidor
+      agents = agents.filter((agent) => updatedAgentIds.has(agent.id));
       
 
-      console.log("Agents loaded and models prepared:", agents);
+      console.log("Agents updated:", agents);
     } else {
-      console.error("Failed to fetch agents:", response.statusText);
+      console.error("Error fetching agents:", response.statusText);
     }
   } catch (error) {
     console.error("Error in getAgents:", error);
   }
 }
+
+async function update() {
+  try {
+    const response = await fetch(agent_server_uri + "update");
+    if (response.ok) {
+      const result = await response.json();
+      console.log(result.message);
+
+      await getAgents();
+
+      // Only redraw if there are visible changes
+      drawScene();
+    } else {
+      console.error("Error during model update:", response.statusText);
+    }
+  } catch (error) {
+    console.error("Error in update:", error);
+  }
+}
+
+
+
 
 
 
@@ -163,6 +247,7 @@ async function main() {
 
   await initAgentsModel();
   await getAgents();
+  setInterval(update, 1000);
 
 }
 
@@ -207,8 +292,7 @@ function updateCameraPosition() {
 
 async function loadObjFromFile(path) {
   const objContent = await fetch(path).then(res => res.text());
-  const mtlPath = path.replace(".obj");
-
+  const mtlPath = path.replace(".obj", ".mtl"); 
   let mtlContent = "";
   try {
     mtlContent = await fetch(mtlPath).then(res => res.text());
@@ -218,6 +302,7 @@ async function loadObjFromFile(path) {
 
   return loadObj(objContent, mtlContent); 
 }
+
 
 
 async function loadMapFromFile(url) {
@@ -231,106 +316,125 @@ async function loadMapFromFile(url) {
     return [];
   }
 }
-// function generateUniformColors(vertexCount, color) {
-//   const triangleCount = vertexCount / 3; 
-//   return Array(triangleCount)
-//     .fill(color) // Aplica el mismo color a cada triángulo
-//     .flatMap(c => c.concat(c, c)); // Repite el color tres veces (una por vértice)
-// }
 
-async function generateGeometryFromMap(mapData) {
+
+async function generateGeometryFromMap(mapData, normals) {
   const positions = [];
   const colors = [];
- //azul :[0.0, 0.0, 1.0, 1.0]
- //amarillo: [1.0, 1.0, 0.0, 1.0]
-  //gris: [0.5, 0.5, 0.5, 1.0]
-  //cian: [0.0, 1.0, 1.0, 1.0]
-  //magenta: [1.0, 0.0, 1.0, 1.0]
-  //verde: [0.0, 1.0, 0.0, 1.0]
-  //gris claro: [0.7, 0.7, 0.7, 1.0]
-  //gris fuerte : [0.2, 0.2, 0.2, 1.0]
+  
+
   const objects = {
-    
-    "#": { path: "/obj/edificio2.obj", color: [0.2, 0.2, 0.2, 1.0] },
-    "S": { path: "/obj/semaforo.obj", color: [0.0, 1.0, 0.0, 1.0] }, 
-    "v": { path: "/obj/cubo.obj", color:  [0.5, 0.5, 0.5, 1.0] }, 
-    "<": { path: "/obj/cubo.obj", color: [0.5, 0.5, 0.5, 1.0] }, 
-    ">": { path: "/obj/cubo.obj", color: [0.5, 0.5, 0.5, 1.0] }, 
-    "^": { path: "/obj/cubo.obj", color: [0.5, 0.5, 0.5, 1.0] }, 
-    "N": { path: "/obj/cubo.obj", color: [0.0, 0.0, 1.0, 1.0] }
+    "#": { path: "/obj/edificio2.obj" },
+    "S": { path: "/obj/semaforo.obj" },
+    "v": { path: "/obj/cubo.obj" },
+    "<": { path: "/obj/cuboi.obj" },
+    ">": { path: "/obj/cuboi.obj" },
+    "^": { path: "/obj/cubo.obj" },
+    "N": { path: "/obj/cubov.obj" },
+    "O": {path: "/obj/objeto.obj"},
+    "A": {path: "/obj/arbol.obj"},
+    "B": {path: "/obj/banco.obj"},
+   
   };
 
-  const agentColor = [1.0, 1.0, 1.0, 1.0]; 
   const processed = Array(mapData.length)
     .fill(false)
     .map(() => Array(mapData[0].length).fill(false));
+  
 
   for (let z = 0; z < mapData.length; z++) {
     const row = mapData[z];
     for (let x = 0; x < row.length; x++) {
       const cell = row[x];
 
-      if (cell === "#") {
-        if (!processed[z][x]) {
-          let width = 0;
-          let height = 0;
-
-          while (x + width < row.length && mapData[z][x + width] === "#" && !processed[z][x + width]) {
-            width++;
-          }
-
-          while (
-            z + height < mapData.length &&
-            mapData[z + height].slice(x, x + width).every((c, i) => c === "#" && !processed[z + height][x + i])
-          ) {
-            height++;
-          }
-
-          for (let dz = 0; dz < height; dz++) {
-            for (let dx = 0; dx < width; dx++) {
-              processed[z + dz][x + dx] = true;
-            }
-          }
-
-          const offsetX = x + width / 2;
-          const offsetZ = z + height / 2;
-          const scaleX = width;
-          const scaleZ = height;
-          const scaleY = Math.max(1.0, Math.sqrt(width * height)); 
-          const baseOffsetY = 0;
-
-          for (let dz = 0; dz < height; dz++) {
-            for (let dx = 0; dx < width; dx++) {
-              const objDataCube = await loadObjFromFile(objects["N"].path);
-              if (objDataCube) {
-                for (let i = 0; i < objDataCube.a_position.data.length; i += 3) {
-                  positions.push(
-                    objDataCube.a_position.data[i] + (x + dx),
-                    objDataCube.a_position.data[i + 1] + baseOffsetY,
-                    objDataCube.a_position.data[i + 2] + (z + dz)
-                  );
+      if (cell === "#" && !processed[z][x]) {
+        let width = 0;
+        let height = 0;
+        
+    
+        while (x + width < row.length && mapData[z][x + width] === "#" && !processed[z][x + width]) {
+              width++;
+        }
+  
+        while (
+              z + height < mapData.length &&
+              mapData[z + height].slice(x, x + width).every((c, i) => c === "#" && !processed[z + height][x + i])
+        ) {
+              height++;
+        }
+    
+        if (width >= 1 && height >= 1) {
+            const blockWidth = Math.min(width, 4);
+            const blockHeight = Math.min(height, 4);
+    
+            const offsetX = x + blockWidth / 2;
+            const offsetZ = z + blockHeight / 2;
+            const scaleX = blockWidth;
+            const scaleZ = blockHeight;
+            const scaleY = Math.max(1.0, Math.sqrt(blockWidth * blockHeight)); 
+            const baseOffsetY = 0;
+            for (let dz = 0; dz < height; dz++) {
+              for (let dx = 0; dx < width; dx++) {
+                const objDataCube = await loadObjFromFile(objects["N"].path);
+                if (objDataCube) {
+                  for (let i = 0; i < objDataCube.a_position.data.length; i += 3) {
+                    positions.push(
+                      objDataCube.a_position.data[i] + (x + dx),
+                      objDataCube.a_position.data[i + 1] + baseOffsetY,
+                      objDataCube.a_position.data[i + 2] + (z + dz)
+                    );
+                  }
+                  colors.push(...objDataCube.a_color.data);
                 }
-                colors.push(...generateUniformColors(objDataCube.a_position.data.length / 3, objects["N"].color));
               }
             }
-          }
-
-          const objDataBuilding = await loadObjFromFile(objects["#"].path);
-          if (objDataBuilding) {
-            for (let i = 0; i < objDataBuilding.a_position.data.length; i += 3) {
-              positions.push(
-                objDataBuilding.a_position.data[i] * scaleX + offsetX,
-                objDataBuilding.a_position.data[i + 1] * scaleY + baseOffsetY + scaleY / 2,
-                objDataBuilding.a_position.data[i + 2] * scaleZ + offsetZ
-              );
+            const objDataBuilding = await loadObjFromFile(objects["#"].path);
+            if (objDataBuilding) {
+                for (let i = 0; i < objDataBuilding.a_position.data.length; i += 3) {
+                    positions.push(
+                        objDataBuilding.a_position.data[i] * scaleX + offsetX,
+                        objDataBuilding.a_position.data[i + 1] * scaleY + baseOffsetY + scaleY / 2,
+                        objDataBuilding.a_position.data[i + 2] * scaleZ + offsetZ
+                    );
+                }
+                colors.push(...objDataBuilding.a_color.data);
             }
-            colors.push(
-              ...generateUniformColors(objDataBuilding.a_position.data.length / 3, objects["#"].color)
+        }
+    
+        for (let dz = 0; dz < height; dz++) {
+            for (let dx = 0; dx < width; dx++) {
+                processed[z + dz][x + dx] = true;
+            }
+        }
+    }
+    else if (( cell === "v" || cell === "^") && !processed[z][x]) {
+        const objData = await loadObjFromFile(objects["v"].path);
+        if (objData) {
+          for (let i = 0; i < objData.a_position.data.length; i += 3) {
+            positions.push(
+              objData.a_position.data[i] + x,
+              objData.a_position.data[i + 1], 
+              objData.a_position.data[i + 2] + z
             );
           }
+          colors.push(...objData.a_color.data);
         }
-      }
-       else if (cell === "S") {
+      }else if (( cell === "<" || cell === ">") && !processed[z][x]) {
+        const objData = await loadObjFromFile(objects["<"].path);
+        if (objData) {
+          for (let i = 0; i < objData.a_position.data.length; i += 3) {
+            positions.push(
+              objData.a_position.data[i] + x,
+              objData.a_position.data[i + 1], 
+              objData.a_position.data[i + 2] + z
+            );
+          }
+          colors.push(...objData.a_color.data);
+        }
+      
+              
+
+      }else if (cell === "S" && !processed[z][x]) {
         const objDataTrafficLight = await loadObjFromFile(objects["S"].path);
         if (objDataTrafficLight) {
           for (let i = 0; i < objDataTrafficLight.a_position.data.length; i += 3) {
@@ -340,7 +444,31 @@ async function generateGeometryFromMap(mapData) {
               objDataTrafficLight.a_position.data[i + 2] + z
             );
           }
-          colors.push(...generateUniformColors(objDataTrafficLight.a_position.data.length / 3, objects["S"].color));
+          colors.push(...objDataTrafficLight.a_color.data);
+        }
+
+        const objDataCube = await loadObjFromFile(objects["N"].path);
+        if (objDataCube) {
+          for (let i = 0; i < objDataCube.a_position.data.length; i += 3) {
+            positions.push(
+              objDataCube.a_position.data[i] + x,
+              objDataCube.a_position.data[i + 1],
+              objDataCube.a_position.data[i + 2] + z
+            );
+          }
+          colors.push(...objDataCube.a_color.data);
+        }
+      }else if (cell === "A" && !processed[z][x]) {
+        const objDataTree = await loadObjFromFile(objects["A"].path);
+        if (objDataTree) {
+          for (let i = 0; i < objDataTree.a_position.data.length; i += 3) {
+            positions.push(
+              objDataTree.a_position.data[i] + x,
+              objDataTree.a_position.data[i + 1] + 1,
+              objDataTree.a_position.data[i + 2] + z
+            );
+          }
+          colors.push(...objDataTree.a_color.data);
         }
       
         const objDataCube = await loadObjFromFile(objects["N"].path);
@@ -348,17 +476,16 @@ async function generateGeometryFromMap(mapData) {
           for (let i = 0; i < objDataCube.a_position.data.length; i += 3) {
             positions.push(
               objDataCube.a_position.data[i] + x,
-              objDataCube.a_position.data[i + 1] - 1, 
+              objDataCube.a_position.data[i + 1], 
               objDataCube.a_position.data[i + 2] + z
             );
           }
-          colors.push(...generateUniformColors(objDataCube.a_position.data.length / 3, objects["N"].color));
+          colors.push(...objDataCube.a_color.data);
         }
-      }
-      
-      else if (objects[cell] && !processed[z][x]) {
+        
+
+      }else if (objects[cell] && !processed[z][x]) {
         const objData = await loadObjFromFile(objects[cell].path);
-        const color = objects[cell].color;
 
         if (objData) {
           const offsetX = x * 1.0;
@@ -372,101 +499,85 @@ async function generateGeometryFromMap(mapData) {
               objData.a_position.data[i + 2] + offsetZ
             );
           }
-          colors.push(...generateUniformColors(objData.a_position.data.length / 3, color));
+          colors.push(...objData.a_color.data);
         }
       }
+
     }
   }
-  
 
   return {
     position: new Float32Array(positions),
     color: new Float32Array(colors),
+    normal: new Float32Array(normals),
+    
   };
 }
-
-function generateUniformColors(vertexCount, color) {
-  const colors = [];
-  for (let i = 0; i < vertexCount; i++) {
-    colors.push(...color);
-  }
-  return colors;
-}
-
 
 
 
 async function setupMapFromFile(url) {
   const mapData = await loadMapFromFile(url);
   const geometryData = await generateGeometryFromMap(mapData);
+
   if (geometryData) {
     mapBufferInfo = twgl.createBufferInfoFromArrays(gl, {
       a_position: { numComponents: 3, data: geometryData.position },
       a_color: { numComponents: 4, data: geometryData.color },
+      a_normal: { numComponents: 3, data: geometryData.normal }, 
     });
   }
+
+  return mapData; 
 }
 
-function getTerrainHeight(x, z, mapWidth, mapBufferInfo) {
-  const index = (z * mapWidth + x) * 3; 
 
-  if (index + 1 >= mapBufferInfo.a_position.data.length) {
-    console.warn("Índice fuera de rango al calcular altura del terreno.");
-    return 0;
+
+
+function getRotationFromDirection(symbol) {
+  switch (symbol) {
+    case 'v': return -Math.PI / 2;
+    case '^': return Math.PI / 2;      
+    case '>': return Math.PI;
+    case '<': return 0;
+    default: return 0; 
   }
-
-  return mapBufferInfo.a_position.data[index + 1] || 0; 
 }
 
 async function drawAgent(agent) {
-  const { position, objPath } = agent;
+  const {  objPath, symbol } = agent;
 
-  // Cargar modelo desde archivo
   const objData = await loadObjFromFile(objPath);
   if (!objData) {
     console.error(`Error al cargar el modelo para el agente ${agent.id}`);
     return;
   }
 
-  // Transformar posiciones según la posición del agente
-  const transformedPositions = [];
-  for (let i = 0; i < objData.a_position.data.length; i += 3) {
-    transformedPositions.push(
-      objData.a_position.data[i] + position[0],
-      objData.a_position.data[i + 1] + position[1],
-      objData.a_position.data[i + 2] + position[2]
-    );
-  }
-
-  // Crear geometría para el buffer
   const agentGeometry = {
-    a_position: { numComponents: 3, data: new Float32Array(transformedPositions) },
+    a_position: { numComponents: 3, data: new Float32Array(objData.a_position.data) },
     a_color: { numComponents: 4, data: new Float32Array(objData.a_color.data) },
     a_normal: { numComponents: 3, data: new Float32Array(objData.a_normal.data) },
   };
 
-  // Crear buffer TWGL y almacenarlo en el agente
   agent.bufferInfo = twgl.createBufferInfoFromArrays(gl, agentGeometry);
+  agent.loaded = true;
 
-  // Opcional: Puedes almacenar otros datos útiles en el objeto `agent`
-  agent.loaded = true; // Indica que el modelo ha sido cargado
+  agent.rotation = getRotationFromDirection(symbol);
 }
 
 
+
 function drawScene() {
-  // Actualiza la posición de la cámara
   updateCameraPosition();
 
-  // Ajusta el canvas al tamaño de la pantalla y configura WebGL
   twgl.resizeCanvasToDisplaySize(gl.canvas);
   gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
-  gl.clearColor(0.2, 0.2, 0.2, 1); // Fondo gris oscuro
+  gl.clearColor(0.2, 0.2, 0.2, 1);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-  
+
   gl.enable(gl.DEPTH_TEST);
   gl.enable(gl.CULL_FACE);
 
-  // Configuración de las matrices de vista y proyección
   const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
   const projectionMatrix = twgl.m4.perspective((Math.PI / 4), aspect, 0.1, 100);
   const cameraMatrix = twgl.m4.lookAt(
@@ -477,34 +588,95 @@ function drawScene() {
   const viewMatrix = twgl.m4.inverse(cameraMatrix);
   const viewProjectionMatrix = twgl.m4.multiply(projectionMatrix, viewMatrix);
 
-  // Renderizar el mapa
+  // Configuración de la luz
+  const lightDirection = [1, 1, 1]; 
+  const ambientLight = [.7, .7, .7, .7]; 
+  const diffuseLight = [1.0, 1.0, 1.0, 1.0]; 
+  const specularLight = [1.0, 1.0, 1.0, 1.0]; 
+
+  // Dibujar el mapa
   gl.useProgram(programInfo.program);
   twgl.setBuffersAndAttributes(gl, programInfo, mapBufferInfo);
-  twgl.setUniforms(programInfo, { u_matrix: viewProjectionMatrix });
+
+  twgl.setUniforms(programInfo, {
+    u_matrix: viewProjectionMatrix,
+    u_model: twgl.m4.identity(),
+    u_lightDirection: lightDirection,
+    u_ambientLight: ambientLight,
+    u_diffuseLight: diffuseLight,
+    u_specularLight: specularLight,
+    u_cameraPosition: [cameraPosition.x, cameraPosition.y, cameraPosition.z],
+    u_shininess: 32.0,
+  });
+
   twgl.drawBufferInfo(gl, mapBufferInfo);
 
-  if (agents && agents.length > 0) {
-    for (const agent of agents) {
-      if (agent.loaded && agent.bufferInfo) {
-        gl.useProgram(programInfo.program);
-        twgl.setBuffersAndAttributes(gl, programInfo, agent.bufferInfo);
-  
-        const uniforms = {
-          u_matrix: viewProjectionMatrix,
-        };
-  
-        twgl.setUniforms(programInfo, uniforms);
-        twgl.drawBufferInfo(gl, agent.bufferInfo);
-      }
+  // Dibujar agentes
+  for (const agent of agents) {
+    if (agent.loaded && agent.bufferInfo) {
+      gl.useProgram(programInfo.program);
+      twgl.setBuffersAndAttributes(gl, programInfo, agent.bufferInfo);
+
+      const modelMatrix = twgl.m4.identity();
+      twgl.m4.translate(modelMatrix, agent.position, modelMatrix);
+      twgl.m4.rotateY(modelMatrix, agent.rotation, modelMatrix);
+
+      twgl.setUniforms(programInfo, {
+        u_matrix: twgl.m4.multiply(viewProjectionMatrix, modelMatrix),
+        u_model: modelMatrix,
+        u_lightDirection: lightDirection,
+        u_ambientLight: ambientLight,
+        u_diffuseLight: diffuseLight,
+        u_specularLight: specularLight,
+        u_cameraPosition: [cameraPosition.x, cameraPosition.y, cameraPosition.z],
+        u_shininess: 32.0,
+      });
+
+      twgl.drawBufferInfo(gl, agent.bufferInfo);
     }
   }
-  
 
-  // Llama al próximo frame
   requestAnimationFrame(drawScene);
 }
 
 
+function loadMtl(mtlContent) {
+  const materials = {};
+  let currentMaterial = null;
+
+  const lines = mtlContent.split("\n");
+
+  lines.forEach((line) => {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length === 0 || parts[0].startsWith("#")) return;
+
+    switch (parts[0]) {
+      case "newmtl":
+        currentMaterial = parts[1];
+        materials[currentMaterial] = { Ka: [1, 1, 1], Kd: [1, 1, 1], Ks: [0, 0, 0], Ns: 0, d: 1 };
+        break;
+      case "Ka":
+        materials[currentMaterial].Ka = parts.slice(1).map(parseFloat);
+        break;
+      case "Kd":
+        materials[currentMaterial].Kd = parts.slice(1).map(parseFloat);
+        break;
+      case "Ks":
+        materials[currentMaterial].Ks = parts.slice(1).map(parseFloat);
+        break;
+      case "Ns":
+        materials[currentMaterial].Ns = parseFloat(parts[1]);
+        break;
+      case "d":
+        materials[currentMaterial].d = parseFloat(parts[1]);
+        break;
+      default:
+        break;
+    }
+  });
+
+  return materials;
+}
 function loadObj(objContent, mtlContent) {
   const jsonObject = {
     a_position: { numComponents: 3, data: [] },
@@ -517,41 +689,58 @@ function loadObj(objContent, mtlContent) {
   const faces = [];
   let hasNormals = false;
 
-  const materials = loadMtl(mtlContent); 
+  const materials = loadMtl(mtlContent);
+  let currentMaterialName = null;
 
   const lines = objContent.split("\n");
-
   lines.forEach((line) => {
     const parts = line.trim().split(/\s+/);
-    try {
-      if (parts[0] === "vn") {
+    if (parts.length === 0 || parts[0].startsWith("#")) return;
+
+    switch (parts[0]) {
+      case "v": 
+        vertices.push(parts.slice(1).map(parseFloat));
+        break;
+
+      case "vn": 
         hasNormals = true;
         normals.push(parts.slice(1).map(parseFloat));
-      } else if (parts[0] === "v") {
-        vertices.push(parts.slice(1).map(parseFloat));
-      } else if (parts[0] === "f") {
+        break;
+
+      case "f": 
         const face = parts.slice(1).map((v) => {
           const [vIdx, , nIdx] = v.split("//").map((x) => (x ? parseInt(x, 10) - 1 : undefined));
-          if (vIdx >= 0 && vIdx < vertices.length) {
-            return { vIdx, nIdx };
+          return { vIdx, nIdx };
+        });
+
+        face.forEach(({ vIdx, nIdx }) => {
+          jsonObject.a_position.data.push(...vertices[vIdx]);
+
+          if (hasNormals && nIdx !== undefined) {
+            jsonObject.a_normal.data.push(...normals[nIdx]);
           } else {
-            throw new Error("Índice de vértice fuera de rango");
+            jsonObject.a_normal.data.push(0, 0, 0);
+          }
+
+          if (currentMaterialName && materials[currentMaterialName]) {
+            const mat = materials[currentMaterialName];
+            jsonObject.a_color.data.push(...mat.Kd, mat.d); 
+          } else {
+            jsonObject.a_color.data.push(1.0, 1.0, 1.0, 1.0); 
           }
         });
+
         faces.push(face);
-      } else if (parts[0] === "usemtl") {
-        const materialName = parts[1];
-        jsonObject.currentMaterial = materials[materialName] || [1.0, 1.0, 1.0, 1.0]; 
-      }
-    } catch (e) {
-      console.warn(`Error procesando línea: "${line}" - ${e.message}`);
+        break;
+
+      case "usemtl": 
+        currentMaterialName = parts[1];
+        break;
+
+      default:
+        break;
     }
   });
-
-  if (!hasNormals) {
-    console.error("El archivo OBJ no contiene normales (vn). No se puede procesar.");
-    return null;
-  }
 
   const normalizeVertices = (vertices) => {
     let min = [Infinity, Infinity, Infinity];
@@ -559,12 +748,16 @@ function loadObj(objContent, mtlContent) {
 
     vertices.forEach((v) => {
       for (let i = 0; i < 3; i++) {
-        if (v[i] < min[i]) min[i] = v[i];
-        if (v[i] > max[i]) max[i] = v[i];
+        min[i] = Math.min(min[i], v[i]);
+        max[i] = Math.max(max[i], v[i]);
       }
     });
 
-    const center = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
+    const center = [
+      (min[0] + max[0]) / 2,
+      (min[1] + max[1]) / 2,
+      (min[2] + max[2]) / 2,
+    ];
     const maxRange = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
 
     return vertices.map((v) => [
@@ -576,51 +769,26 @@ function loadObj(objContent, mtlContent) {
 
   const normalizedVertices = normalizeVertices(vertices);
 
+  jsonObject.a_position.data = [];
   faces.forEach((face) => {
-    face.forEach(({ vIdx, nIdx }) => {
+    face.forEach(({ vIdx }) => {
       jsonObject.a_position.data.push(...normalizedVertices[vIdx]);
-
-      if (nIdx !== undefined && nIdx >= 0 && nIdx < normals.length) {
-        jsonObject.a_normal.data.push(...normals[nIdx]);
-      }
-
-      jsonObject.a_color.data.push(...(jsonObject.currentMaterial || [1.0, 1.0, 1.0, 1.0]));
     });
   });
+
+  if (!hasNormals) {
+    console.warn("El archivo OBJ no contiene normales (vn). Generando normales por defecto.");
+  }
 
   return jsonObject;
 }
 
-function loadMtl(mtlContent) {
-  const materials = {};
-  let currentMaterial = null;
-
-  const lines = mtlContent.split("\n");
-
-  lines.forEach((line) => {
-    const parts = line.trim().split(/\s+/);
-    if (parts[0] === "newmtl") {
-      currentMaterial = parts[1];
-      materials[currentMaterial] = [1.0, 1.0, 1.0, 1.0]; 
-    } else if (parts[0] === "Kd" && currentMaterial) {
-      const color = parts.slice(1).map(parseFloat);
-      materials[currentMaterial] = [...color, 1.0]; 
-    } else if (parts[0] === "d" && currentMaterial) {
-      materials[currentMaterial][3] = parseFloat(parts[1]);
-    }
-  });
-
-  return materials;
-}
-
 function setupUI() {
-  // Crear una instancia de lil-gui
   const gui = new GUI();
 
   // Crear una carpeta para la posición de la cámara
   const posFolder = gui.addFolder('Posición de la cámara');
 
-  // Agregar sliders para cada eje
   posFolder.add(cameraPosition, 'x', -100, 100).onChange((value) => {
     cameraPosition.x = value;
   });
@@ -633,7 +801,7 @@ function setupUI() {
     cameraPosition.z = value;
   });
 
-  posFolder.open(); // Abre la carpeta por defecto
+  posFolder.open(); 
 }
 
 main();

@@ -2,7 +2,7 @@
 in vec4 a_position;
 in vec3 a_normal;
 
-// Scene uiforms
+// Scene uniforms
 uniform vec3 u_viewWorldPosition;
 uniform vec3 u_lightWorldPosition;
 
