@@ -1,299 +1,270 @@
 'use strict';
-
 import * as twgl from 'twgl.js';
 import GUI from 'lil-gui';
 
-// Define the vertex shader code, using GLSL 3.00
+
 const vsGLSL = `#version 300 es
 in vec4 a_position;
 in vec4 a_color;
 
-uniform mat4 u_transforms;
 uniform mat4 u_matrix;
 
 out vec4 v_color;
+out vec3 v_normal;       // Normales transformadas
+out vec3 v_position;     // Posición del vértice en espacio de cámara
 
 void main() {
-gl_Position = u_matrix * a_position;
-v_color = a_color;
+    gl_Position = u_matrix * a_position;
+    v_color = a_color;
 }
 `;
 
-// Define the fragment shader code, using GLSL 3.00
 const fsGLSL = `#version 300 es
 precision highp float;
 
 in vec4 v_color;
+in vec3 v_normal;
+in vec3 v_position;
+
+uniform vec3 u_lightDirection; // Dirección de la luz (normalizada)
+uniform vec4 u_ambientLight;   // Componente de luz ambiental
+uniform vec4 u_diffuseLight;   // Componente de luz difusa
+uniform vec4 u_specularLight;  // Componente de luz especular
+uniform vec3 u_cameraPosition; // Posición de la cámara
+uniform float u_shininess;     // Brillo para cálculo especular
 
 out vec4 outColor;
 
 void main() {
-outColor = v_color;
+    outColor = v_color;
 }
 `;
 
-// Define the Object3D class to represent 3D objects
-class Object3D {
-  constructor(id, position=[0,0,0], rotation=[0,0,0], scale=[1,1,1]){
-    this.id = id;
-    this.position = position;
-    this.rotation = rotation;
-    this.scale = scale;
-    this.matrix = twgl.m4.create();
-  }
-}
-
-// Define the agent server URI
 const agent_server_uri = "http://localhost:8585/";
+let gl, programInfo, mapBufferInfo;
+let canvas, cameraPosition, target;
+let mapData = [];
+const cameraSpeed = 1;
+const cameraDelta = { x: 0, y: 10, z: 0 };
 
-// Initialize arrays to store agents and obstacles
-const agents = [];
-const obstacles = [];
-
-// Initialize WebGL-related variables
-let gl, programInfo, carAgents, obstacleArrays, agentsBufferInfo, obstaclesBufferInfo, agentsVao, obstaclesVao, mapBufferInfo, mapVao;
-
-// Define the camera position
-let cameraPosition = {x:0, y:9, z:9};
-
-// Initialize the frame count
-let frameCount = 0;
-
-// Define the data object
-const data = {
-  NAgents: 10,
-  width: 50,
-  height: 50
-};
-
-function loadObj(objContent) {
-    const jsonObject = {
-        a_position: { numComponents: 3, data: [] },
-        a_color: { numComponents: 4, data: [] },
-        a_normal: { numComponents: 3, data: [] }
-    };
-
-    const vertices = [];
-    const normals = [];
-    const faces = [];
-    let hasNormals = false;
-
-    const lines = objContent.split('\n');
-
-    lines.forEach(line => {
-        const parts = line.trim().split(/\s+/);
-        try {
-            if (parts[0] === 'vn') {
-                hasNormals = true;
-                normals.push(parts.slice(1).map(parseFloat));
-            } else if (parts[0] === 'v') {
-                vertices.push(parts.slice(1).map(parseFloat));
-            } else if (parts[0] === 'f') {
-                const face = parts.slice(1).map(v => {
-                    const [vIdx, , nIdx] = v.split('//').map(x => (x ? parseInt(x, 10) - 1 : undefined));
-                    if (vIdx >= 0 && vIdx < vertices.length) {
-                        return { vIdx, nIdx };
-                    } else {
-                        throw new Error("Índice de vértice fuera de rango");
-                    }
-                });
-                faces.push(face);
-            }
-        } catch (e) {
-            console.warn(`Error procesando línea: "${line}" - ${e.message}`);
-        }
-    });
-
-    if (!hasNormals) {
-        console.error("El archivo OBJ no contiene normales (vn). No se puede procesar.");
-        return null;
-    }
-
-    const normalizeVertices = (vertices) => {
-        let min = [Infinity, Infinity, Infinity];
-        let max = [-Infinity, -Infinity, -Infinity];
-
-        vertices.forEach(v => {
-            for (let i = 0; i < 3; i++) {
-                if (v[i] < min[i]) min[i] = v[i];
-                if (v[i] > max[i]) max[i] = v[i];
-            }
-        });
-
-        const center = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
-        const maxRange = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
-
-        return vertices.map(v => [
-            (v[0] - center[0]) / maxRange,
-            (v[1] - center[1]) / maxRange,
-            (v[2] - center[2]) / maxRange
-        ]);
-    };
-
-    const normalizedVertices = normalizeVertices(vertices);
-
-    faces.forEach(face => {
-        face.forEach(({ vIdx, nIdx }) => {
-            jsonObject.a_position.data.push(...normalizedVertices[vIdx]);
-
-            if (nIdx !== undefined && nIdx >= 0 && nIdx < normals.length) {
-                jsonObject.a_normal.data.push(...normals[nIdx]);
-            }
-        });
-    });
-
-    return jsonObject;
-}
-
-class Map3D {
-  constructor(width, height) {
-    this.width = width;
-    this.height = height;
-    this.objects = []; 
-  }
-
-  async generateGeometryFromMap(mapData, objectPaths) {
-    const processed = Array(mapData.length)
-      .fill(false)
-      .map(() => Array(mapData[0].length).fill(false));
-
-    for (let z = 0; z < mapData.length; z++) {
-      const row = mapData[z];
-      for (let x = 0; x < row.length; x++) {
-        const cell = row[x];
-
-        if (cell === "#" && !processed[z][x]) {
-          let width = 0;
-          let height = 0;
-
-          while (x + width < row.length && mapData[z][x + width] === "#" && !processed[z][x + width]) {
-            width++;
-          }
-
-          while (
-            z + height < mapData.length &&
-            mapData[z + height].slice(x, x + width).every((c, i) => c === "#" && !processed[z + height][x + i])
-          ) {
-            height++;
-          }
-
-          for (let dz = 0; dz < height; dz++) {
-            for (let dx = 0; dx < width; dx++) {
-              processed[z + dz][x + dx] = true;
-            }
-          }
-
-          const offsetX = x + width / 2;
-          const offsetZ = z + height / 2;
-          const scaleX = width;
-          const scaleZ = height;
-          const scaleY = Math.max(1.0, Math.sqrt(width * height));
-          const offsetY = .5 * scaleY;
-
-          const objPath = objectPaths["#"];
-          const objData = await loadObjFromFile(objPath);
-
-          if (objData) {
-            const obstacle = new Object3D(
-              `obstacle-${x}-${z}`,
-              [offsetX, offsetY, offsetZ],
-              [0.5, 0.5, 0.5, 1.0] // Color gris
-            );
-            obstacle.objData = objData; // Guardar datos OBJ
-            obstacle.scale = [scaleX, scaleY, scaleZ]; // Escalar correctamente
-            this.objects.push(obstacle);
-          }
-        } else if (objectPaths[cell]) {
-          if (!processed[z][x]) {
-            const objPath = objectPaths[cell];
-            const objData = await loadObjFromFile(objPath);
-            let color = [1.0, 1.0, 1.0]; // Color blanco predeterminado
-
-            if (cell === "S") {
-              color = [0.4, 0.4, 0.4]; // Semáforo gris oscuro
-            } else if (cell === "v" || cell === "<" || cell === ">" || cell === "^") {
-              color = [0.5, 0.5, 0.5]; // Agentes u objetos similares
-            }
-
-            const offsetX = x;
-            const offsetZ = z;
-            const offsetY = 0.0;
-
-            if (objData) {
-              const object = new Object3D(
-                `object-${x}-${z}`,
-                [offsetX, offsetY, offsetZ],
-                color
-              );
-              object.objData = objData;
-              this.objects.push(object);
-            }
-
-            processed[z][x] = true;
-          }
-        }
-      }
-    }
-  }
-
-  generateBuffers() {
-    const positions = [];
-    const colors = [];
-
-    this.objects.forEach((object) => {
-      const { objData, position, scale, color } = object;
-
-      if (objData) {
-        const [offsetX, offsetY, offsetZ] = position;
-        const [scaleX, scaleY, scaleZ] = scale || [1, 1, 1];
-
-        for (let i = 0; i < objData.a_position.data.length; i += 3) {
-          positions.push(
-            objData.a_position.data[i] * scaleX + offsetX,
-            objData.a_position.data[i + 1] * scaleY + offsetY,
-            objData.a_position.data[i + 2] * scaleZ + offsetZ
-          );
-        }
-
-        colors.push(
-          ...Array(objData.a_position.data.length / 3).fill(color).flat()
-        );
-      }
-    });
-
-    return {
-      position: new Float32Array(positions),
-      color: new Float32Array(colors),
-    };
-  }
-}
-
-async function setupMapFromFile(url, map3DInstance, objectPaths) {
-  const mapData = await loadMapFromFile(url);
-  if (map3DInstance && mapData.length > 0) {
-    await map3DInstance.generateGeometryFromMap(mapData, objectPaths);
-    const geometryData = map3DInstance.generateBuffers();
-
-    if (geometryData) {
-      mapBufferInfo = twgl.createBufferInfoFromArrays(gl, {
-        a_position: { numComponents: 3, data: geometryData.position },
-        a_color: { numComponents: 4, data: geometryData.color }, // Colores RGBA
-      });
-    }
-  } else {
-    console.error("No se pudo generar el mapa 3D: mapa o instancia inválidos.");
-  }
-}
-async function loadObjFromFile(url) {
+async function initAgentsModel() {
+  const data = {
+    NAgents: 10,
+    width: 28,
+    height: 28
+  };
   try {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`No se pudo cargar el archivo OBJ ${url}`);
-    const objContent = await response.text();
-    return loadObj(objContent);
+    let response = await fetch(agent_server_uri + 'init', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+
+    if (response.ok) {
+      let result = await response.json();
+      console.log(result.message);
+    }
   } catch (error) {
-    console.error("Error cargando el archivo OBJ:", error);
-    return null;
+    console.log('Error initializing model', error);
   }
+}
+
+function interpolatePosition(start, end, t) {
+  return start.map((startCoord, i) => startCoord + (end[i] - startCoord) * t);
+}
+
+let agents = [];
+const interpolationDuration = 1000; // Duración de la interpolación en milisegundos
+
+async function getAgents() {
+  try {
+    const response = await fetch(agent_server_uri + "getAgents");
+    if (response.ok) {
+      const result = await response.json();
+      const positions = result.positions;
+
+      if (positions.length === 0) {
+        console.warn("No agent positions received.");
+        return;
+      }
+
+      const updatedAgentIds = new Set();
+      const currentTime = Date.now();
+
+      for (const agentData of positions) {
+        const agentId = agentData.id;
+        const newPosition = [agentData.x, agentData.y, agentData.z];
+
+        // Obtener la rotación según el símbolo actual del agente
+        const rotation = getRotationFromDirection(agentData.symbol);
+
+        let agent = agents.find((a) => a.id === agentId);
+
+        if (agent) {
+          // Si la posición o el símbolo (y por ende la rotación) ha cambiado
+          if (
+            agent.position[0] !== agentData.x ||
+            agent.position[1] !== agentData.y ||
+            agent.position[2] !== agentData.z ||
+            agent.symbol !== agentData.symbol
+          ) {
+            agent.startPosition = agent.position; // Guarda la posición inicial
+            agent.endPosition = newPosition;      // Guarda la posición final
+            agent.startTime = currentTime;        // Tiempo de inicio de la interpolación
+            agent.symbol = agentData.symbol;
+            agent.rotation = rotation;
+          }
+        } else {
+          // Crear nuevo agente
+          agent = {
+            id: agentId,
+            startPosition: newPosition,
+            endPosition: newPosition,
+            position: newPosition,
+            startTime: currentTime,
+            rotation: rotation,
+            color: [0.0, 1.0, 0.0],
+            objPath: "/obj/coche.obj",
+            bufferInfo: null,
+            loaded: false,
+            symbol: agentData.symbol,
+          };
+
+          await drawAgent(agent);
+          agents.push(agent);
+        }
+
+        updatedAgentIds.add(agentId);
+      }
+
+      agents = agents.filter((agent) => updatedAgentIds.has(agent.id));
+
+      console.log("Agents updated:", agents);
+    } else {
+      console.error("Error fetching agents:", response.statusText);
+    }
+  } catch (error) {
+    console.error("Error in getAgents:", error);
+  }
+}
+
+
+
+
+
+function updateAgentPositions() {
+  const currentTime = Date.now();
+
+  for (const agent of agents) {
+    if (agent.startPosition && agent.endPosition) {
+      const elapsedTime = currentTime - agent.startTime;
+      const t = Math.min(elapsedTime / interpolationDuration, 1);
+
+      agent.position = interpolatePosition(agent.startPosition, agent.endPosition, t);
+    }
+  }
+}
+
+async function update() {
+  try {
+    const response = await fetch(agent_server_uri + "update");
+    if (response.ok) {
+      const result = await response.json();
+      console.log(result.message);
+      console.log(`Agents arrived: ${result.agentsArrived}`)
+      console.log(`Actual agents: ${result.actualAgents}`)
+
+      await getAgents();
+
+      drawScene();
+    } else {
+      console.error("Error during model update:", response.statusText);
+    }
+  } catch (error) {
+    console.error("Error in update:", error);
+  }
+}
+
+async function main() {
+  canvas = document.querySelector("canvas");
+  gl = canvas.getContext("webgl2");
+  if (!gl) {
+    console.error("WebGL2 no está disponible en este navegador.");
+    return;
+  }
+
+  programInfo = twgl.createProgramInfo(gl, [vsGLSL, fsGLSL]);
+
+  cameraPosition = { x: 15, y: 50, z: 28 };
+  target = [0, 0, 0];
+
+  setupKeyboardControls();
+  setupUI();
+
+  await setupMapFromFile("map.txt");
+  if (!mapBufferInfo) {
+    console.error("No se pudo cargar el mapa.");
+    return;
+  }
+  console.log("Mapa cargado correctamente.", mapBufferInfo);
+
+  requestAnimationFrame(drawScene);
+
+  await initAgentsModel();
+  await getAgents();
+  setInterval(update, 1000);
+}
+
+function setupKeyboardControls() {
+  document.addEventListener("keydown", (event) => {
+    switch (event.key) {
+      case "ArrowUp":
+        cameraDelta.z = -cameraSpeed;
+        break;
+      case "ArrowDown":
+        cameraDelta.z = cameraSpeed;
+        break;
+      case "ArrowLeft":
+        cameraDelta.x = -cameraSpeed;
+        break;
+      case "ArrowRight":
+        cameraDelta.x = cameraSpeed;
+        break;
+    }
+  });
+
+  document.addEventListener("keyup", (event) => {
+    switch (event.key) {
+      case "ArrowUp":
+      case "ArrowDown":
+        cameraDelta.z = 0;
+        break;
+      case "ArrowLeft":
+      case "ArrowRight":
+        cameraDelta.x = 0;
+        break;
+    }
+  });
+}
+
+function updateCameraPosition() {
+  cameraPosition.x += cameraDelta.x;
+  cameraPosition.z += cameraDelta.z;
+
+  target = [cameraPosition.x, 0, cameraPosition.z - 10];
+}
+
+async function loadObjFromFile(path) {
+  const objContent = await fetch(path).then(res => res.text());
+  const mtlPath = path.replace(".obj", ".mtl");
+  let mtlContent = "";
+  try {
+    mtlContent = await fetch(mtlPath).then(res => res.text());
+  } catch (e) {
+    console.warn(`No se encontró archivo MTL para ${path}`);
+  }
+
+  return loadObj(objContent, mtlContent);
 }
 
 async function loadMapFromFile(url) {
@@ -301,7 +272,6 @@ async function loadMapFromFile(url) {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`No se pudo cargar el archivo ${url}`);
     const text = await response.text();
-    console.log("Contenido del mapa:", text); // Depuración
     return text.split("\n").map((line) => line.split(""));
   } catch (error) {
     console.error("Error cargando el archivo:", error);
@@ -309,559 +279,451 @@ async function loadMapFromFile(url) {
   }
 }
 
+async function generateGeometryFromMap(mapData) {
+  const positions = [];
+  const colors = [];
+  const buildings = [
+    '/obj/greenHouse.obj',
+    '/obj/pinkHouse.obj',
+    '/obj/orangeHouse.obj',
+    '/obj/purpleHouse.obj',
+    '/obj/yellowHouse.obj'
+  ];
 
-async function main() {
-  const canvas = document.querySelector('canvas');
-  gl = canvas.getContext('webgl2');
-
-  programInfo = twgl.createProgramInfo(gl, [vsGLSL, fsGLSL]);
-
-  // Carga del modelo del coche
-  const jsonData = await fetch('/obj/coche.obj').then(response => response.text()).then(loadObj);
-  obstacleArrays = generateObstacleData(1);
-
-  // Buffers de agentes (coche)
-  carAgents = {
-    a_position: { numComponents: 3, data: jsonData.a_position.data },
-    a_color: { numComponents: 4, data: jsonData.a_color.data },
-    a_normal: { numComponents: 3, data: jsonData.a_normal.data }
-  };
-  agentsBufferInfo = twgl.createBufferInfoFromArrays(gl, carAgents);
-  agentsVao = twgl.createVAOFromBufferInfo(gl, programInfo, agentsBufferInfo);
-
-  // Buffers de obstáculos
-  obstaclesBufferInfo = twgl.createBufferInfoFromArrays(gl, obstacleArrays);
-  obstaclesVao = twgl.createVAOFromBufferInfo(gl, programInfo, obstaclesBufferInfo);
-
-  // Carga y configuración del mapa
-  const objectPaths = {
-    "#": "/obj/edificio1.obj",
-    "S": "/obj/semaforo.obj",
-    "v": "/obj/cubo.obj",
-    "<": "/obj/cubo.obj",
-    ">": "/obj/cubo.obj",
-    "^": "/obj/cubo.obj",
-  };
-  const map3DInstance = new Map3D(); // Instancia de la clase `Map3D`
-  await setupMapFromFile('mapa.txt', map3DInstance, objectPaths);
-
-  // Crear VAO y BufferInfo para el mapa
-  mapBufferInfo = twgl.createBufferInfoFromArrays(gl, {
-    a_position: { numComponents: 3, data: map3DInstance.position },
-    a_color: { numComponents: 4, data: map3DInstance.color },
-  });
-  mapVao = twgl.createVAOFromBufferInfo(gl, programInfo, mapBufferInfo);
-
-  // Inicialización de UI y modelos
-  setupUI();
-  await initAgentsModel();
-  await getAgents();
-  await getObstacles();
-
-  // Dibujar la escena
-  await drawScene(gl, programInfo, agentsVao, agentsBufferInfo, obstaclesVao, obstaclesBufferInfo, mapVao, mapBufferInfo);
-}
-
-/*
- * Initializes the agents model by sending a POST request to the agent server.
- */
-async function initAgentsModel() {
-  try {
-    // Send a POST request to the agent server to initialize the model
-    let response = await fetch(agent_server_uri + "init", {
-      method: 'POST', 
-      headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify(data)
-    })
-
-    // Check if the response was successful
-    if(response.ok){
-      // Parse the response as JSON and log the message
-      let result = await response.json()
-      console.log(result.message)
-    }
-      
-  } catch (error) {
-    // Log any errors that occur during the request
-    console.log(error)    
+  function getRandomBuilding() {
+    const randomIndex = Math.floor(Math.random() * buildings.length);
+    return buildings[randomIndex];
   }
-}
 
-/*
- * Retrieves the current positions of all agents from the agent server.
- */async function getAgents() {
-  try {
-    // Send a GET request to the agent server to retrieve the agent positions
-    let response = await fetch(agent_server_uri + "getAgents") 
+  const objects = {
+    "#": { get path() { return getRandomBuilding(); } },
+    "S": { path: "/obj/semaforochafa.obj" },
+    "v": { path: "/obj/cubo.obj" },
+    "<": { path: "/obj/cuboi.obj" },
+    ">": { path: "/obj/cuboi.obj" },
+    "^": { path: "/obj/cubo.obj" },
+    "N": { path: "/obj/cubov.obj" },
+    "O": { path: "/obj/objeto.obj" },
+    "A": { path: "/obj/arbol.obj" },
+    "B": { path: "/obj/banco.obj" },
+  };
 
-    // Check if the response was successful
-    if(response.ok){
-      // Parse the response as JSON
-      let result = await response.json()
+  const processed = Array(mapData.length)
+    .fill(false)
+    .map(() => Array(mapData[0].length).fill(false));
 
-      // Log the agent positions
-      //console.log(result.positions)
+  for (let z = 0; z < mapData.length; z++) {
+    const row = mapData[z];
+    for (let x = 0; x < row.length; x++) {
+      const cell = row[x];
 
-      // Check if the agents array is empty
-      if(agents.length == 0){
-        // Create new agents and add them to the agents array
-        for (const agent of result.positions) {
-          const newAgent = new Object3D(agent.id, [agent.x, agent.y, agent.z])
-          agents.push(newAgent)
+      if (cell === "#" && !processed[z][x]) {
+        let width = 0;
+        let height = 0;
+
+        while (x + width < row.length && mapData[z][x + width] === "#" && !processed[z][x + width]) {
+          width++;
         }
-        // Log the agents array
-        console.log("Agents:", agents)
 
-      } else {
-        // Update the positions of existing agents
-        for (const agent of result.positions) {
-          const current_agent = agents.find((object3d) => object3d.id == agent.id)
+        while (
+          z + height < mapData.length &&
+          mapData[z + height].slice(x, x + width).every((c, i) => c === "#" && !processed[z + height][x + i])
+        ) {
+          height++;
+        }
 
-          // Check if the agent exists in the agents array
-          if(current_agent != undefined){
-            // Update the agent's position
-            current_agent.position = [agent.x, agent.y, agent.z]
+        if (width >= 1 && height >= 1) {
+          const blockWidth = Math.min(width, 8);
+          const blockHeight = Math.min(height, 8);
+
+          const offsetX = x + blockWidth / 2;
+          const offsetZ = z + blockHeight / 2;
+          const scaleX = blockWidth;
+          const scaleZ = blockHeight;
+          const scaleY = Math.max(1.0, Math.sqrt(blockWidth * blockHeight));
+          const baseOffsetY = 0;
+          for (let dz = 0; dz < height; dz++) {
+            for (let dx = 0; dx < width; dx++) {
+              const objDataCube = await loadObjFromFile(objects["N"].path);
+              if (objDataCube) {
+                for (let i = 0; i < objDataCube.a_position.data.length; i += 3) {
+                  positions.push(
+                    objDataCube.a_position.data[i] + (x + dx),
+                    objDataCube.a_position.data[i + 1] + baseOffsetY,
+                    objDataCube.a_position.data[i + 2] + (z + dz)
+                  );
+                }
+                colors.push(...objDataCube.a_color.data);
+              }
+            }
+          }
+          const objDataBuilding = await loadObjFromFile(objects["#"].path);
+          if (objDataBuilding) {
+            for (let i = 0; i < objDataBuilding.a_position.data.length; i += 3) {
+              positions.push(
+                objDataBuilding.a_position.data[i] * scaleX + offsetX - 0.4,
+                objDataBuilding.a_position.data[i + 1] * scaleY + baseOffsetY + scaleY / 2,
+                objDataBuilding.a_position.data[i + 2] * scaleZ + offsetZ - 0.5
+              );
+            }
+            colors.push(...objDataBuilding.a_color.data);
           }
         }
+
+        for (let dz = 0; dz < height; dz++) {
+          for (let dx = 0; dx < width; dx++) {
+            processed[z + dz][x + dx] = true;
+          }
+        }
+      } else if ((cell === "v" || cell === "^") && !processed[z][x]) {
+        const objData = await loadObjFromFile(objects["v"].path);
+        if (objData) {
+          for (let i = 0; i < objData.a_position.data.length; i += 3) {
+            positions.push(
+              objData.a_position.data[i] + x,
+              objData.a_position.data[i + 1],
+              objData.a_position.data[i + 2] + z
+            );
+          }
+          colors.push(...objData.a_color.data);
+        }
+      } else if ((cell === "<" || cell === ">") && !processed[z][x]) {
+        const objData = await loadObjFromFile(objects["<"].path);
+        if (objData) {
+          for (let i = 0; i < objData.a_position.data.length; i += 3) {
+            positions.push(
+              objData.a_position.data[i] + x,
+              objData.a_position.data[i + 1],
+              objData.a_position.data[i + 2] + z
+            );
+          }
+          colors.push(...objData.a_color.data);
+        }
+      } else if (cell === "S" && !processed[z][x]) {
+        const objDataTrafficLight = await loadObjFromFile(objects["S"].path);
+        if (objDataTrafficLight) {
+          for (let i = 0; i < objDataTrafficLight.a_position.data.length; i += 3) {
+            positions.push(
+              objDataTrafficLight.a_position.data[i] + x,
+              objDataTrafficLight.a_position.data[i + 1] + 1,
+              objDataTrafficLight.a_position.data[i + 2] + z
+            );
+          }
+          colors.push(...objDataTrafficLight.a_color.data);
+        }
+
+        const objDataCube = await loadObjFromFile(objects["O"].path);
+        if (objDataCube) {
+          for (let i = 0; i < objDataCube.a_position.data.length; i += 3) {
+            positions.push(
+              objDataCube.a_position.data[i] + x,
+              objDataCube.a_position.data[i + 1],
+              objDataCube.a_position.data[i + 2] + z
+            );
+          }
+          colors.push(...objDataCube.a_color.data);
+        }
+      } else if (cell === "A" && !processed[z][x]) {
+        const objDataTree = await loadObjFromFile(objects["A"].path);
+        if (objDataTree) {
+          for (let i = 0; i < objDataTree.a_position.data.length; i += 3) {
+            positions.push(
+              objDataTree.a_position.data[i] + x,
+              objDataTree.a_position.data[i + 1] + 1,
+              objDataTree.a_position.data[i + 2] + z
+            );
+          }
+          colors.push(...objDataTree.a_color.data);
+        }
+
+        const objDataCube = await loadObjFromFile(objects["N"].path);
+        if (objDataCube) {
+          for (let i = 0; i < objDataCube.a_position.data.length; i += 3) {
+            positions.push(
+              objDataCube.a_position.data[i] + x,
+              objDataCube.a_position.data[i + 1],
+              objDataCube.a_position.data[i + 2] + z
+            );
+          }
+          colors.push(...objDataCube.a_color.data);
+        }
+      } else if (objects[cell] && !processed[z][x]) {
+        const objData = await loadObjFromFile(objects[cell].path);
+
+        if (objData) {
+          const offsetX = x * 1.0;
+          const offsetZ = z * 1.0;
+          const offsetY = 0.0;
+
+          for (let i = 0; i < objData.a_position.data.length; i += 3) {
+            positions.push(
+              objData.a_position.data[i] + offsetX,
+              objData.a_position.data[i + 1] + offsetY,
+              objData.a_position.data[i + 2] + offsetZ
+            );
+          }
+          colors.push(...objData.a_color.data);
+        }
       }
     }
+  }
 
-  } catch (error) {
-    // Log any errors that occur during the request
-    console.log(error) 
+  return {
+    position: new Float32Array(positions),
+    color: new Float32Array(colors),
+  };
+}
+
+async function setupMapFromFile(url) {
+  const mapData = await loadMapFromFile(url);
+  const geometryData = await generateGeometryFromMap(mapData);
+
+  if (geometryData) {
+    mapBufferInfo = twgl.createBufferInfoFromArrays(gl, {
+      a_position: { numComponents: 3, data: geometryData.position },
+      a_color: { numComponents: 4, data: geometryData.color },
+      a_normal: { numComponents: 3, data: geometryData.normal }, 
+    });
+  }
+
+  return mapData;
+}
+
+function getRotationFromDirection(symbol) {
+  switch (symbol) {
+    case 'v': return Math.PI / 2;
+    case '^': return -Math.PI / 2;
+    case '>': return Math.PI;
+    case '<': return 0;
+    default: return 0;
   }
 }
 
-/*
- * Retrieves the current positions of all obstacles from the agent server.
- */
-async function getObstacles() {
+async function drawAgent(agent) {
+  const { objPath, symbol } = agent;
+
   try {
-    // Send a GET request to the agent server to retrieve the obstacle positions
-    let response = await fetch(agent_server_uri + "getObstacles") 
-
-    // Check if the response was successful
-    if(response.ok){
-      // Parse the response as JSON
-      let result = await response.json()
-
-      // Create new obstacles and add them to the obstacles array
-      for (const obstacle of result.positions) {
-        const newObstacle = new Object3D(obstacle.id, [obstacle.x, obstacle.y, obstacle.z])
-        obstacles.push(newObstacle)
-      }
-      // Log the obstacles array
-      console.log("Obstacles:", obstacles)
+    const objData = await loadObjFromFile(objPath);
+    if (!objData) {
+      console.error(`Error al cargar el modelo para el agente ${agent.id}`);
+      return;
     }
 
+    const agentGeometry = {
+      a_position: { numComponents: 3, data: new Float32Array(objData.a_position.data) },
+      a_color: { numComponents: 4, data: new Float32Array(objData.a_color.data) },
+    };
+
+    agent.bufferInfo = twgl.createBufferInfoFromArrays(gl, agentGeometry);
+    agent.loaded = true;
+
+    agent.rotation = getRotationFromDirection(symbol);
   } catch (error) {
-    // Log any errors that occur during the request
-    console.log(error) 
+    console.error(`Error al cargar el agente ${agent.id}:`, error);
   }
 }
 
-/*
- * Updates the agent positions by sending a request to the agent server.
- */
-async function update() {
-  try {
-    // Send a request to the agent server to update the agent positions
-    let response = await fetch(agent_server_uri + "update") 
+function drawScene() {
+  updateCameraPosition();
+  updateAgentPositions();
 
-    // Check if the response was successful
-    if(response.ok){
-      // Retrieve the updated agent positions
-      await getAgents()
-      // Log a message indicating that the agents have been updated
-     // console.log("Updated agents")
-    }
-
-  } catch (error) {
-    // Log any errors that occur during the request
-    console.log(error) 
-  }
-}
-
-
-
-async function drawScene(gl, programInfo, agentsVao, agentsBufferInfo, obstaclesVao, obstaclesBufferInfo, mapVao, mapBufferInfo) {
-  // Resize del canvas y configuración básica
   twgl.resizeCanvasToDisplaySize(gl.canvas);
   gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
   gl.clearColor(0.2, 0.2, 0.2, 1);
-  gl.enable(gl.DEPTH_TEST);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-  // Usar el programa
-  gl.useProgram(programInfo.program);
+  gl.enable(gl.DEPTH_TEST);
+  gl.enable(gl.CULL_FACE);
 
-  // Configurar matriz de vista-proyección
-  const viewProjectionMatrix = setupWorldView(gl);
-
-  // Distancia para renderizado
-  const distance = 1;
-
-  // Dibujar mapa (con sus respectivos buffers y VAO)
-  if (mapVao && mapBufferInfo) {
-    drawMap(distance, mapVao, mapBufferInfo, viewProjectionMatrix);
-  }
-
-  // Dibujar agentes (con sus respectivos buffers y VAO)
-  if (agentsVao && agentsBufferInfo) {
-    drawAgents(distance, agentsVao, agentsBufferInfo, viewProjectionMatrix);
-  }
-
-  // Dibujar obstáculos (con sus respectivos buffers y VAO)
-  if (obstaclesVao && obstaclesBufferInfo) {
-    drawObstacles(distance, obstaclesVao, obstaclesBufferInfo, viewProjectionMatrix);
-  }
-
-  // Incrementar el contador de frames
-  frameCount++;
-  if (frameCount % 30 === 0) {
-    frameCount = 0;
-    await update(); // Actualización de estado si es necesario
-  }
-
-  // Solicitar el siguiente frame para la animación
-  requestAnimationFrame(() =>
-    drawScene(gl, programInfo, agentsVao, agentsBufferInfo, obstaclesVao, obstaclesBufferInfo, mapVao, mapBufferInfo)
+  const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+  const projectionMatrix = twgl.m4.perspective((Math.PI / 4), aspect, 0.1, 100);
+  const cameraMatrix = twgl.m4.lookAt(
+    [cameraPosition.x, cameraPosition.y, cameraPosition.z],
+    target,
+    [0, 1, 0]
   );
-}
+  const viewMatrix = twgl.m4.inverse(cameraMatrix);
+  const viewProjectionMatrix = twgl.m4.multiply(projectionMatrix, viewMatrix);
 
+  // Configuración de la luz
+  const lightDirection = [1, 1, 1]; 
+  const ambientLight = [.7, .7, .7, .7]; 
+  const diffuseLight = [1.0, 1.0, 1.0, 1.0]; 
+  const specularLight = [1.0, 1.0, 1.0, 1.0]; 
 
-/*
- * Draws the agents.
- * 
- * @param {Number} distance - The distance for rendering.
- * @param {WebGLVertexArrayObject} agentsVao - The vertex array object for agents.
- * @param {Object} agentsBufferInfo - The buffer information for agents.
- * @param {Float32Array} viewProjectionMatrix - The view-projection matrix.
- */
-function drawAgents(distance, agentsVao, agentsBufferInfo, viewProjectionMatrix){
-    // Bind the vertex array object for agents
-    gl.bindVertexArray(agentsVao);
+  // Dibujar el mapa
+  gl.useProgram(programInfo.program);
+  twgl.setBuffersAndAttributes(gl, programInfo, mapBufferInfo);
 
-    // Iterate over the agents
-    for(const agent of agents){
+  twgl.setUniforms(programInfo, {
+    u_matrix: viewProjectionMatrix,
+  });
 
-      // Create the agent's transformation matrix
-      const cube_trans = twgl.v3.create(...agent.position);
-      const cube_scale = twgl.v3.create(...agent.scale);
+  twgl.drawBufferInfo(gl, mapBufferInfo);
 
-      // Calculate the agent's matrix
-      agent.matrix = twgl.m4.translate(viewProjectionMatrix, cube_trans);
-      agent.matrix = twgl.m4.rotateX(agent.matrix, agent.rotation[0]);
-      agent.matrix = twgl.m4.rotateY(agent.matrix, agent.rotation[1]);
-      agent.matrix = twgl.m4.rotateZ(agent.matrix, agent.rotation[2]);
-      agent.matrix = twgl.m4.scale(agent.matrix, cube_scale);
+  for (const agent of agents) {
+    if (agent.loaded && agent.bufferInfo) {
+      gl.useProgram(programInfo.program);
+      twgl.setBuffersAndAttributes(gl, programInfo, agent.bufferInfo);
 
-      // Set the uniforms for the agent
-      let uniforms = {
-          u_matrix: agent.matrix,
-      }
+      const modelMatrix = twgl.m4.identity();
+      twgl.m4.translate(modelMatrix, agent.position, modelMatrix);
+      twgl.m4.rotateY(modelMatrix, agent.rotation, modelMatrix);
 
-      // Set the uniforms and draw the agent
-      twgl.setUniforms(programInfo, uniforms);
-      twgl.drawBufferInfo(gl, agentsBufferInfo);
-      
+      twgl.setUniforms(programInfo, {
+        u_matrix: twgl.m4.multiply(viewProjectionMatrix, modelMatrix),
+      });
+
+      twgl.drawBufferInfo(gl, agent.bufferInfo);
     }
+  }
+
+  requestAnimationFrame(drawScene);
 }
 
-      
-/*
- * Draws the obstacles.
- * 
- * @param {Number} distance - The distance for rendering.
- * @param {WebGLVertexArrayObject} obstaclesVao - The vertex array object for obstacles.
- * @param {Object} obstaclesBufferInfo - The buffer information for obstacles.
- * @param {Float32Array} viewProjectionMatrix - The view-projection matrix.
- */
-function drawObstacles(distance, obstaclesVao, obstaclesBufferInfo, viewProjectionMatrix){
-    // Bind the vertex array object for obstacles
-    gl.bindVertexArray(obstaclesVao);
+function loadMtl(mtlContent) {
+  const materials = {};
+  let currentMaterial = null;
 
-    // Iterate over the obstacles
-    for(const obstacle of obstacles){
-      // Create the obstacle's transformation matrix
-      const cube_trans = twgl.v3.create(...obstacle.position);
-      const cube_scale = twgl.v3.create(...obstacle.scale);
+  const lines = mtlContent.split("\n");
 
-      // Calculate the obstacle's matrix
-      obstacle.matrix = twgl.m4.translate(viewProjectionMatrix, cube_trans);
-      obstacle.matrix = twgl.m4.rotateX(obstacle.matrix, obstacle.rotation[0]);
-      obstacle.matrix = twgl.m4.rotateY(obstacle.matrix, obstacle.rotation[1]);
-      obstacle.matrix = twgl.m4.rotateZ(obstacle.matrix, obstacle.rotation[2]);
-      obstacle.matrix = twgl.m4.scale(obstacle.matrix, cube_scale);
+  lines.forEach((line) => {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length === 0 || parts[0].startsWith("#")) return;
 
-      // Set the uniforms for the obstacle
-      let uniforms = {
-          u_matrix: obstacle.matrix,
-      }
-
-      // Set the uniforms and draw the obstacle
-      twgl.setUniforms(programInfo, uniforms);
-      twgl.drawBufferInfo(gl, obstaclesBufferInfo);
-      
+    switch (parts[0]) {
+      case "newmtl":
+        currentMaterial = parts[1];
+        materials[currentMaterial] = { Ka: [1, 1, 1], Kd: [1, 1, 1], Ks: [0, 0, 0], Ns: 0, d: 1 };
+        break;
+      case "Ka":
+        materials[currentMaterial].Ka = parts.slice(1).map(parseFloat);
+        break;
+      case "Kd":
+        materials[currentMaterial].Kd = parts.slice(1).map(parseFloat);
+        break;
+      case "Ks":
+        materials[currentMaterial].Ks = parts.slice(1).map(parseFloat);
+        break;
+      case "Ns":
+        materials[currentMaterial].Ns = parseFloat(parts[1]);
+        break;
+      case "d":
+        materials[currentMaterial].d = parseFloat(parts[1]);
+        break;
+      default:
+        break;
     }
+  });
+
+  return materials;
 }
 
-/*
- * Sets up the world view by creating the view-projection matrix.
- * 
- * @param {WebGLRenderingContext} gl - The WebGL rendering context.
- * @returns {Float32Array} The view-projection matrix.
- */
-function setupWorldView(gl) {
-    // Set the field of view (FOV) in radians
-    const fov = 45 * Math.PI / 180;
+function loadObj(objContent, mtlContent) {
+  const jsonObject = {
+    a_position: { numComponents: 3, data: [] },
+    a_color: { numComponents: 4, data: [] },
+  };
 
-    // Calculate the aspect ratio of the canvas
-    const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+  const vertices = [];
+  const faces = [];
+  const materials = loadMtl(mtlContent);
+  let currentMaterialName = null;
 
-    // Create the projection matrix
-    const projectionMatrix = twgl.m4.perspective(fov, aspect, 1, 200);
+  const lines = objContent.split("\n");
+  lines.forEach((line) => {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length === 0 || parts[0].startsWith("#")) return;
 
-    // Set the target position
-    const target = [data.width/2, 0, data.height/2];
+    switch (parts[0]) {
+      case "v":
+        vertices.push(parts.slice(1).map(parseFloat));
+        break;
 
-    // Set the up vector
-    const up = [0, 1, 0];
+      case "f":
+        const face = parts.slice(1).map((v) => {
+          const [vIdx] = v.split("/").map((x) => (x ? parseInt(x, 10) - 1 : undefined));
+          return { vIdx };
+        });
 
-    // Calculate the camera position
-    const camPos = twgl.v3.create(cameraPosition.x + data.width/2, cameraPosition.y, cameraPosition.z+data.height/2)
+        face.forEach(({ vIdx }) => {
+          jsonObject.a_position.data.push(...vertices[vIdx]);
 
-    // Create the camera matrix
-    const cameraMatrix = twgl.m4.lookAt(camPos, target, up);
+          if (currentMaterialName && materials[currentMaterialName]) {
+            const mat = materials[currentMaterialName];
+            jsonObject.a_color.data.push(...mat.Kd, mat.d);
+          } else {
+            jsonObject.a_color.data.push(1.0, 1.0, 1.0, 1.0);
+          }
+        });
 
-    // Calculate the view matrix
-    const viewMatrix = twgl.m4.inverse(cameraMatrix);
+        faces.push(face);
+        break;
 
-    // Calculate the view-projection matrix
-    const viewProjectionMatrix = twgl.m4.multiply(projectionMatrix, viewMatrix);
+      case "usemtl":
+        currentMaterialName = parts[1];
+        break;
 
-    // Return the view-projection matrix
-    return viewProjectionMatrix;
+      default:
+        break;
+    }
+  });
+
+  const normalizeVertices = (vertices) => {
+    let min = [Infinity, Infinity, Infinity];
+    let max = [-Infinity, -Infinity, -Infinity];
+
+    vertices.forEach((v) => {
+      for (let i = 0; i < 3; i++) {
+        min[i] = Math.min(min[i], v[i]);
+        max[i] = Math.max(max[i], v[i]);
+      }
+    });
+
+    const center = [
+      (min[0] + max[0]) / 2,
+      (min[1] + max[1]) / 2,
+      (min[2] + max[2]) / 2,
+    ];
+    const maxRange = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
+
+    return vertices.map((v) => [
+      (v[0] - center[0]) / maxRange,
+      (v[1] - center[1]) / maxRange,
+      (v[2] - center[2]) / maxRange,
+    ]);
+  };
+
+  const normalizedVertices = normalizeVertices(vertices);
+
+  jsonObject.a_position.data = [];
+  faces.forEach((face) => {
+    face.forEach(({ vIdx }) => {
+      jsonObject.a_position.data.push(...normalizedVertices[vIdx]);
+    });
+  });
+
+  return jsonObject;
 }
 
-/*
- * Sets up the user interface (UI) for the camera position.
- */
 function setupUI() {
-    // Create a new GUI instance
-    const gui = new GUI();
+  const gui = new GUI();
 
-    // Create a folder for the camera position
-    const posFolder = gui.addFolder('Position:')
+  const posFolder = gui.addFolder('Posición de la cámara');
 
-    // Add a slider for the x-axis
-    posFolder.add(cameraPosition, 'x', -100, 100)
-        .onChange( value => {
-            // Update the camera position when the slider value changes
-            cameraPosition.x = value
-        });
+  posFolder.add(cameraPosition, 'x', -100, 100).onChange((value) => {
+    cameraPosition.x = value;
+  });
 
-    // Add a slider for the y-axis
-    posFolder.add( cameraPosition, 'y', -100, 100)
-        .onChange( value => {
-            // Update the camera position when the slider value changes
-            cameraPosition.y = value
-        });
+  posFolder.add(cameraPosition, 'y', -100, 100).onChange((value) => {
+    cameraPosition.y = value;
+  });
 
-    // Add a slider for the z-axis
-    posFolder.add( cameraPosition, 'z', -100, 100)
-        .onChange( value => {
-            // Update the camera position when the slider value changes
-            cameraPosition.z = value
-        });
+  posFolder.add(cameraPosition, 'z', -100, 100).onChange((value) => {
+    cameraPosition.z = value;
+  });
+
+  posFolder.open();
 }
 
-// function generateData(size) {
-//     let arrays =
-//     {
-//         a_position: {
-//                 numComponents: 3,
-//                 data: [
-//                   // Front Face
-//                   -0.5, -0.5,  0.5,
-//                   0.5, -0.5,  0.5,
-//                   0.5,  0.5,  0.5,
-//                  -0.5,  0.5,  0.5,
-
-//                  // Back face
-//                  -0.5, -0.5, -0.5,
-//                  -0.5,  0.5, -0.5,
-//                   0.5,  0.5, -0.5,
-//                   0.5, -0.5, -0.5,
-
-//                  // Top face
-//                  -0.5,  0.5, -0.5,
-//                  -0.5,  0.5,  0.5,
-//                   0.5,  0.5,  0.5,
-//                   0.5,  0.5, -0.5,
-
-//                  // Bottom face
-//                  -0.5, -0.5, -0.5,
-//                   0.5, -0.5, -0.5,
-//                   0.5, -0.5,  0.5,
-//                  -0.5, -0.5,  0.5,
-
-//                  // Right face
-//                   0.5, -0.5, -0.5,
-//                   0.5,  0.5, -0.5,
-//                   0.5,  0.5,  0.5,
-//                   0.5, -0.5,  0.5,
-
-//                  // Left face
-//                  -0.5, -0.5, -0.5,
-//                  -0.5, -0.5,  0.5,
-//                  -0.5,  0.5,  0.5,
-//                  -0.5,  0.5, -0.5
-//                 ].map(e => size * e)
-//             },
-//         a_color: {
-//                 numComponents: 4,
-//                 data: [
-//                   // Front face
-//                     1, 0, 0, 1, // v_1
-//                     1, 0, 0, 1, // v_1
-//                     1, 0, 0, 1, // v_1
-//                     1, 0, 0, 1, // v_1
-//                   // Back Face
-//                     0, 1, 0, 1, // v_2
-//                     0, 1, 0, 1, // v_2
-//                     0, 1, 0, 1, // v_2
-//                     0, 1, 0, 1, // v_2
-//                   // Top Face
-//                     0, 0, 1, 1, // v_3
-//                     0, 0, 1, 1, // v_3
-//                     0, 0, 1, 1, // v_3
-//                     0, 0, 1, 1, // v_3
-//                   // Bottom Face
-//                     1, 1, 0, 1, // v_4
-//                     1, 1, 0, 1, // v_4
-//                     1, 1, 0, 1, // v_4
-//                     1, 1, 0, 1, // v_4
-//                   // Right Face
-//                     0, 1, 1, 1, // v_5
-//                     0, 1, 1, 1, // v_5
-//                     0, 1, 1, 1, // v_5
-//                     0, 1, 1, 1, // v_5
-//                   // Left Face
-//                     1, 0, 1, 1, // v_6
-//                     1, 0, 1, 1, // v_6
-//                     1, 0, 1, 1, // v_6
-//                     1, 0, 1, 1, // v_6
-//                 ]
-//             },
-//         indices: {
-//                 numComponents: 3,
-//                 data: [
-//                   0, 1, 2,      0, 2, 3,    // Front face
-//                   4, 5, 6,      4, 6, 7,    // Back face
-//                   8, 9, 10,     8, 10, 11,  // Top face
-//                   12, 13, 14,   12, 14, 15, // Bottom face
-//                   16, 17, 18,   16, 18, 19, // Right face
-//                   20, 21, 22,   20, 22, 23  // Left face
-//                 ]
-//             }
-//     };
-
-//     return arrays;
-// }
-
-function generateObstacleData(size){
-
-    let arrays =
-    {
-        a_position: {
-                numComponents: 3,
-                data: [
-                  // Front Face
-                  -0.5, -0.5,  0.5,
-                  0.5, -0.5,  0.5,
-                  0.5,  0.5,  0.5,
-                 -0.5,  0.5,  0.5,
-
-                 // Back face
-                 -0.5, -0.5, -0.5,
-                 -0.5,  0.5, -0.5,
-                  0.5,  0.5, -0.5,
-                  0.5, -0.5, -0.5,
-
-                 // Top face
-                 -0.5,  0.5, -0.5,
-                 -0.5,  0.5,  0.5,
-                  0.5,  0.5,  0.5,
-                  0.5,  0.5, -0.5,
-
-                 // Bottom face
-                 -0.5, -0.5, -0.5,
-                  0.5, -0.5, -0.5,
-                  0.5, -0.5,  0.5,
-                 -0.5, -0.5,  0.5,
-
-                 // Right face
-                  0.5, -0.5, -0.5,
-                  0.5,  0.5, -0.5,
-                  0.5,  0.5,  0.5,
-                  0.5, -0.5,  0.5,
-
-                 // Left face
-                 -0.5, -0.5, -0.5,
-                 -0.5, -0.5,  0.5,
-                 -0.5,  0.5,  0.5,
-                 -0.5,  0.5, -0.5
-                ].map(e => size * e)
-            },
-        a_color: {
-                numComponents: 4,
-                data: [
-                  // Front face
-                    0, 0, 0, 1, // v_1
-                    0, 0, 0, 1, // v_1
-                    0, 0, 0, 1, // v_1
-                    0, 0, 0, 1, // v_1
-                  // Back Face
-                    0.333, 0.333, 0.333, 1, // v_2
-                    0.333, 0.333, 0.333, 1, // v_2
-                    0.333, 0.333, 0.333, 1, // v_2
-                    0.333, 0.333, 0.333, 1, // v_2
-                  // Top Face
-                    0.5, 0.5, 0.5, 1, // v_3
-                    0.5, 0.5, 0.5, 1, // v_3
-                    0.5, 0.5, 0.5, 1, // v_3
-                    0.5, 0.5, 0.5, 1, // v_3
-                  // Bottom Face
-                    0.666, 0.666, 0.666, 1, // v_4
-                    0.666, 0.666, 0.666, 1, // v_4
-                    0.666, 0.666, 0.666, 1, // v_4
-                    0.666, 0.666, 0.666, 1, // v_4
-                  // Right Face
-                    0.833, 0.833, 0.833, 1, // v_5
-                    0.833, 0.833, 0.833, 1, // v_5
-                    0.833, 0.833, 0.833, 1, // v_5
-                    0.833, 0.833, 0.833, 1, // v_5
-                  // Left Face
-                    1, 1, 1, 1, // v_6
-                    1, 1, 1, 1, // v_6
-                    1, 1, 1, 1, // v_6
-                    1, 1, 1, 1, // v_6
-                ]
-            },
-        indices: {
-                numComponents: 3,
-                data: [
-                  0, 1, 2,      0, 2, 3,    // Front face
-                  4, 5, 6,      4, 6, 7,    // Back face
-                  8, 9, 10,     8, 10, 11,  // Top face
-                  12, 13, 14,   12, 14, 15, // Bottom face
-                  16, 17, 18,   16, 18, 19, // Right face
-                  20, 21, 22,   20, 22, 23  // Left face
-                ]
-            }
-    };
-    return arrays;
-}
-
-main()
+main();
