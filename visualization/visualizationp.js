@@ -285,7 +285,7 @@ async function generateGeometryFromMap(mapData) {
 
   const objects = {
     "#": { get path() { return getRandomBuilding(); } },
-    "S": { path: "/obj/semaforo.obj" },
+    "S": { path: "/obj/semaforochafa.obj" },
     "v": { path: "/obj/cubo.obj" },
     "<": { path: "/obj/cuboi.obj" },
     ">": { path: "/obj/cuboi.obj" },
