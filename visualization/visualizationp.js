@@ -89,19 +89,21 @@ async function getAgents() {
         let agent = agents.find((a) => a.id === agentId);
 
         if (agent) {
+          // Si la posición o el símbolo (y por ende la rotación) ha cambiado
           if (
             agent.position[0] !== agentData.x ||
             agent.position[1] !== agentData.y ||
             agent.position[2] !== agentData.z ||
             agent.symbol !== agentData.symbol
           ) {
-            agent.startPosition = agent.position;
-            agent.endPosition = newPosition;
-            agent.startTime = currentTime;
+            agent.startPosition = agent.position; // Guarda la posición inicial
+            agent.endPosition = newPosition;      // Guarda la posición final
+            agent.startTime = currentTime;        // Tiempo de inicio de la interpolación
             agent.symbol = agentData.symbol;
             agent.rotation = rotation;
           }
         } else {
+          // Crear nuevo agente
           agent = {
             id: agentId,
             startPosition: newPosition,
@@ -133,6 +135,10 @@ async function getAgents() {
     console.error("Error in getAgents:", error);
   }
 }
+
+
+
+
 
 function updateAgentPositions() {
   const currentTime = Date.now();
