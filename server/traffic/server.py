@@ -1,3 +1,8 @@
+# server.py
+# Enrique Martínez de Velasco Reyna
+# Diego Valencia Moreno
+# 11-28-2024
+
 from agent import *
 from model import CityModel
 from mesa.visualization import CanvasGrid, BarChartModule
