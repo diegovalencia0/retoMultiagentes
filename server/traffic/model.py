@@ -20,6 +20,7 @@ class CityModel(Model):
         self.running = True
         self.destinations = []
         self.step_count = 1  # To track the number of steps for periodic agent initialization
+        self.arrived = 0
 
         # Load the map file. The map file is a text file where each character represents an agent.
         with open('../cityMap.txt') as baseFile:

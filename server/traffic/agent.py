@@ -54,6 +54,7 @@ class Car(Agent):
             self.destination = self.random.choice(self.model.destinations)
 
     def move(self):
+        
         if not self.destination:
             return
 
@@ -155,6 +156,7 @@ class Destination(Agent):
 
         for agent in cell_contents:
             if isinstance(agent, Car) and agent.destination == self:
+                self.model.arrived =+1
                 self.model.grid.remove_agent(agent)  
                 self.model.schedule.remove(agent)  
 

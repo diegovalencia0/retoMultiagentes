@@ -162,7 +162,7 @@ async function update() {
     const response = await fetch(agent_server_uri + "update");
     if (response.ok) {
       const result = await response.json();
-      console.log(result.message);
+      console.log(result);
 
       await getAgents();
 
