@@ -25,37 +25,76 @@
 // }`;
 
 'use strict';
-
+// import vsGLSL from './assets/vs_phong.glsl?raw';
+// import fsGLSL from './assets/fs_phong.glsl?raw';
 import * as twgl from 'twgl.js';
 import GUI from 'lil-gui';
+
 
 const vsGLSL = `#version 300 es
 in vec4 a_position;
 in vec4 a_color;
-in vec3 color;
+in vec3 a_normal;
 
-
-uniform mat4 u_transforms;
-uniform mat4 u_matrix;
+uniform mat4 u_matrix;   // Matriz MVP
+uniform mat4 u_model;    // Matriz de modelo
 
 out vec4 v_color;
+out vec3 v_normal;       // Normales transformadas
+out vec3 v_position;     // Posición del vértice en espacio de cámara
 
 void main() {
-gl_Position = u_matrix * a_position;
-v_color = a_color;
+    gl_Position = u_matrix * a_position;
+    v_color = a_color;
+
+    // Transformar normales al espacio del modelo (manejo de escalado no uniforme)
+    v_normal = mat3(transpose(inverse(u_model))) * a_normal;
+
+    // Transformar posición al espacio de cámara
+    v_position = (u_model * a_position).xyz;
 }
+
 `;
 
 const fsGLSL = `#version 300 es
 precision highp float;
 
 in vec4 v_color;
+in vec3 v_normal;
+in vec3 v_position;
+
+uniform vec3 u_lightDirection; // Dirección de la luz (normalizada)
+uniform vec4 u_ambientLight;   // Componente de luz ambiental
+uniform vec4 u_diffuseLight;   // Componente de luz difusa
+uniform vec4 u_specularLight;  // Componente de luz especular
+uniform vec3 u_cameraPosition; // Posición de la cámara
+uniform float u_shininess;     // Brillo para cálculo especular
 
 out vec4 outColor;
 
 void main() {
-outColor = v_color;
+    // Normalizar las normales y la dirección de la luz
+    vec3 normal = normalize(v_normal);
+    vec3 lightDir = normalize(u_lightDirection);
+
+    // Componente difusa
+    float diff = max(dot(normal, lightDir), 0.0);
+    vec4 diffuse = diff * u_diffuseLight * v_color;
+
+    // Componente especular
+    vec3 viewDir = normalize(u_cameraPosition - v_position);
+    vec3 reflectDir = reflect(-lightDir, normal);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), u_shininess);
+    vec4 specular = spec * u_specularLight;
+
+    // Componente ambiental
+    vec4 ambient = u_ambientLight * v_color;
+
+    // Combinar componentes
+    outColor = ambient + diffuse + specular;
+    outColor.a = v_color.a; // Mantener el alfa original
 }
+
 `;
 const agent_server_uri = "http://localhost:8585/";
 let gl, programInfo, mapBufferInfo;
@@ -275,7 +314,7 @@ async function loadMapFromFile(url) {
 
 
 
-async function generateGeometryFromMap(mapData) {
+async function generateGeometryFromMap(mapData, normals) {
   const positions = [];
   const colors = [];
   const buildings = [
@@ -303,6 +342,7 @@ async function generateGeometryFromMap(mapData) {
     "O": {path: "/obj/objeto.obj"},
     "A": {path: "/obj/arbol.obj"},
     "B": {path: "/obj/banco.obj"},
+   
   };
 
   const processed = Array(mapData.length)
@@ -318,18 +358,17 @@ async function generateGeometryFromMap(mapData) {
       if (cell === "#" && !processed[z][x]) {
         let width = 0;
         let height = 0;
+        
     
-        // Identificar la anchura del bloque horizontal de '#'
         while (x + width < row.length && mapData[z][x + width] === "#" && !processed[z][x + width]) {
-            width++;
+              width++;
         }
-    
-        // Identificar la altura del bloque vertical de '#'
+  
         while (
-            z + height < mapData.length &&
-            mapData[z + height].slice(x, x + width).every((c, i) => c === "#" && !processed[z + height][x + i])
+              z + height < mapData.length &&
+              mapData[z + height].slice(x, x + width).every((c, i) => c === "#" && !processed[z + height][x + i])
         ) {
-            height++;
+              height++;
         }
     
         // Ignorar bloques que no formen un mínimo de 2x2
@@ -342,7 +381,7 @@ async function generateGeometryFromMap(mapData) {
             const offsetZ = z + blockHeight / 2;
             const scaleX = blockWidth;
             const scaleZ = blockHeight;
-            const scaleY = Math.max(1.0, Math.sqrt(blockWidth * blockHeight)); // Ajusta la altura del edificio
+            const scaleY = Math.max(1.0, Math.sqrt(blockWidth * blockHeight)); 
             const baseOffsetY = 0;
             for (let dz = 0; dz < height; dz++) {
               for (let dx = 0; dx < width; dx++) {
@@ -480,6 +519,7 @@ async function generateGeometryFromMap(mapData) {
   return {
     position: new Float32Array(positions),
     color: new Float32Array(colors),
+    normal: new Float32Array(normals),
     
   };
 }
@@ -494,11 +534,13 @@ async function setupMapFromFile(url) {
     mapBufferInfo = twgl.createBufferInfoFromArrays(gl, {
       a_position: { numComponents: 3, data: geometryData.position },
       a_color: { numComponents: 4, data: geometryData.color },
+      a_normal: { numComponents: 3, data: geometryData.normal }, 
     });
   }
 
   return mapData; 
 }
+
 
 
 
@@ -556,35 +598,56 @@ function drawScene() {
   const viewMatrix = twgl.m4.inverse(cameraMatrix);
   const viewProjectionMatrix = twgl.m4.multiply(projectionMatrix, viewMatrix);
 
+  // Configuración de la luz
+  const lightDirection = [1, 1, 1]; 
+  const ambientLight = [.7, .7, .7, .7]; 
+  const diffuseLight = [1.0, 1.0, 1.0, 1.0]; 
+  const specularLight = [1.0, 1.0, 1.0, 1.0]; 
+
+  // Dibujar el mapa
   gl.useProgram(programInfo.program);
   twgl.setBuffersAndAttributes(gl, programInfo, mapBufferInfo);
-  twgl.setUniforms(programInfo, { u_matrix: viewProjectionMatrix });
+
+  twgl.setUniforms(programInfo, {
+    u_matrix: viewProjectionMatrix,
+    u_model: twgl.m4.identity(),
+    u_lightDirection: lightDirection,
+    u_ambientLight: ambientLight,
+    u_diffuseLight: diffuseLight,
+    u_specularLight: specularLight,
+    u_cameraPosition: [cameraPosition.x, cameraPosition.y, cameraPosition.z],
+    u_shininess: 32.0,
+  });
+
   twgl.drawBufferInfo(gl, mapBufferInfo);
 
-  if (agents && agents.length > 0) {
-    for (const agent of agents) {
-      if (agent.loaded && agent.bufferInfo) {
-        gl.useProgram(programInfo.program);
-        twgl.setBuffersAndAttributes(gl, programInfo, agent.bufferInfo);
+  // Dibujar agentes
+  for (const agent of agents) {
+    if (agent.loaded && agent.bufferInfo) {
+      gl.useProgram(programInfo.program);
+      twgl.setBuffersAndAttributes(gl, programInfo, agent.bufferInfo);
 
-        const modelMatrix = twgl.m4.identity();
-        twgl.m4.translate(modelMatrix, agent.position, modelMatrix); 
-        twgl.m4.rotateY(modelMatrix, agent.rotation, modelMatrix); 
+      const modelMatrix = twgl.m4.identity();
+      twgl.m4.translate(modelMatrix, agent.position, modelMatrix);
+      twgl.m4.rotateY(modelMatrix, agent.rotation, modelMatrix);
 
-        const uniforms = {
-          u_matrix: twgl.m4.multiply(viewProjectionMatrix, modelMatrix), 
-        };
+      twgl.setUniforms(programInfo, {
+        u_matrix: twgl.m4.multiply(viewProjectionMatrix, modelMatrix),
+        u_model: modelMatrix,
+        u_lightDirection: lightDirection,
+        u_ambientLight: ambientLight,
+        u_diffuseLight: diffuseLight,
+        u_specularLight: specularLight,
+        u_cameraPosition: [cameraPosition.x, cameraPosition.y, cameraPosition.z],
+        u_shininess: 32.0,
+      });
 
-        twgl.setUniforms(programInfo, uniforms);
-        twgl.drawBufferInfo(gl, agent.bufferInfo);
-      }
+      twgl.drawBufferInfo(gl, agent.bufferInfo);
     }
   }
 
   requestAnimationFrame(drawScene);
 }
-
-
 
 
 function loadMtl(mtlContent) {
