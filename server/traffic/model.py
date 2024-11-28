@@ -1,3 +1,8 @@
+# model.py
+# Enrique Martínez de Velasco Reyna
+# Diego Valencia Moreno
+# 11-28-2024
+
 from mesa import Model
 from mesa.time import RandomActivation
 from mesa.space import MultiGrid
@@ -20,6 +25,8 @@ class CityModel(Model):
         self.running = True
         self.destinations = []
         self.step_count = 1  # To track the number of steps for periodic agent initialization
+        self.agentsArrived = 0
+        self.actualAgents = 0 #
 
         # Load the map file. The map file is a text file where each character represents an agent.
         with open('../cityMap.txt') as baseFile:
@@ -65,12 +72,39 @@ class CityModel(Model):
             self.grid.place_agent(car, corner)
             self.schedule.add(car)
 
+    def all_cells_filled_by_cars(self):
+        """Checks for car agents on cell"""
+        for contents, (x, y) in self.grid.coord_iter():
+            if not any(isinstance(agent, Car) for agent in contents):
+                return False
+        return True
+
+    """Function to calculate current cars at grid """
+    def howManyCars(self):
+        self.actualAgents = 0
+        for contents, (x,y) in self.grid.coord_iter():
+            if any(isinstance(agent, Car) for agent in contents):
+                self.actualAgents += 1
 
     def step(self):
-        """Advance the model by one step."""
+        print(f"Agents arrived: {self.agentsArrived}")
         self.step_count += 1
-        # Add agents to corners every 10 steps
+        print(f"Actual agents: {self.actualAgents}")
+
+        # Add agents to corners each 10 seconds 
         if self.step_count % 10 == 0:
             self.initialize_corner_agents()
+
         self.schedule.step()
+
+        self.howManyCars()
+
+        """Checks if theres more spaces available or all cells are occupied by car agents"""
+        if self.all_cells_filled_by_cars():
+            self.running = False  # Stop the model
+
+
+
+
+
 

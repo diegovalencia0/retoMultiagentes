@@ -1,6 +1,8 @@
-# TC2008B. Sistemas Multiagentes y Gráficas Computacionales
-# Python flask server to interact with webGL.
-# Octavio Navarro. 2024
+# app.py
+# Enrique Martínez de Velasco Reyna
+# Diego Valencia Moreno
+# 11-28-2024
+
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS, cross_origin
@@ -49,28 +51,28 @@ def initModel():
 def getAgents():
     print('/getAgents request')
 
-    global cityModel  # Asegura que cityModel sea accesible globalmente
+    global cityModel  
 
     if request.method == 'GET':
         try:
-            # Lista para almacenar las posiciones de los agentes
+
             agent_positions = []
             
-            # Iterar sobre las celdas de la cuadrícula
+            # Iterate over grid
             for contents, (x, y) in cityModel.grid.coord_iter():
                 for agent in contents:
                     if isinstance(agent, Car):
-                        # Obtener el símbolo de la celda actual
+                        #Get actual cell symbol
                         cell_contents = cityModel.grid.get_cell_list_contents((x, y))
                         symbol = next((obj.symbol for obj in cell_contents if hasattr(obj, "symbol")), None)
 
-                        # Agregar la posición del agente junto con el símbolo
+                        #Place agent position with symbol
                         agent_positions.append({
                             "id": str(agent.unique_id),
                             "x": x,
-                            "y": .7,  # Y fijo (puedes ajustar si no es necesario)
-                            "z": -y +height -4,  # Invertir el eje y y ajustar la posición
-                            "symbol": symbol if symbol else "?"  # Valor por defecto "?"
+                            "y": .7,  
+                            "z": -y +height +1,  
+                            "symbol": symbol if symbol else "?"  
                         })
 
             print("Agentes encontrados:", agent_positions)
@@ -94,7 +96,9 @@ def updateModel():
             currentStep += 1
             return jsonify({
                 'message': f'Model updated to step {currentStep}.',
-                'currentStep': currentStep
+                'currentStep': currentStep,
+                'agentsArrived': cityModel.agentsArrived,
+                'actualAgents': cityModel.actualAgents
             })
         except Exception as e:
             print(f"Error during model update: {e}")

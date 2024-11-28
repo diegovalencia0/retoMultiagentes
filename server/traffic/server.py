@@ -1,3 +1,8 @@
+# server.py
+# Enrique Martínez de Velasco Reyna
+# Diego Valencia Moreno
+# 11-28-2024
+
 from agent import *
 from model import CityModel
 from mesa.visualization import CanvasGrid, BarChartModule
@@ -49,10 +54,9 @@ with open('../cityMap.txt') as baseFile:
 
 model_params = {"N":1}
 
-print(width, height)
 grid = CanvasGrid(agent_portrayal, width, height, 500, 500)
 
 server = ModularServer(CityModel, [grid], "Traffic Base", model_params)
                        
-server.port = 8522 # The default
+server.port = 8522 
 server.launch()

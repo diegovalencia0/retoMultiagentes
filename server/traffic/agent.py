@@ -1,4 +1,7 @@
-## DIRECTION WORKING GOOD
+# agent.py
+# Enrique Martínez de Velasco Reyna
+# Diego Valencia Moreno
+# 11-28-2024
 
 from mesa import Agent
 from collections import deque
@@ -7,23 +10,18 @@ class Car(Agent):
 
     def __init__(self, unique_id, model):
         super().__init__(unique_id, model)
-        self.waiting = False  
-        self.destination = None
+        self.waiting = False  #Variable to comunicate is at red light
+        self.destination = None #Destination cell
 
+    """Alorithm to determine the path to destination"""
     def bfs(self):
         if not self.destination or not self.pos:
-            print(f"BFS Error: No destination or position set. Destination: {self.destination}, Position: {self.pos}")
             return None
 
         start = self.pos
         end = self.destination.pos
 
-        print(f"BFS Start: {start}, End: {end}")
-
-        # print(f"Destination contents: {self.model.grid.get_cell_list_contents(end)}")
-
-        if start == end:
-            print("Agent already at the destination.")
+        if start == end: 
             return [start]
 
         queue = deque([(start, [start])])
@@ -33,11 +31,10 @@ class Car(Agent):
         while queue:
             current_pos, path = queue.popleft()
 
-            if current_pos == end:
-                print(f"BFS: Path to destination found: {path}")
+            if current_pos == end: #When destination is reached return [start]
                 return path
 
-            neighbors = self.model.grid.get_neighborhood(current_pos, moore=True, include_center=False)
+            neighbors = self.model.grid.get_neighborhood(current_pos, moore=True, include_center=False) #Get neiighbors including corners for diagonal move
 
             for neighbor in neighbors:
                 if neighbor in visited:
@@ -48,20 +45,17 @@ class Car(Agent):
 
                 cell_contents = self.model.grid.get_cell_list_contents(neighbor)
 
-                occupied_by_car = any(isinstance(agent, Car) for agent in cell_contents)
+                occupied_by_car = any(isinstance(agent, Car) for agent in cell_contents) #Checks if next move cell has a car
 
                 if not occupied_by_car:
                     visited.add(neighbor)
                     queue.append((neighbor, path + [neighbor]))
-
-        print(f"BFS: No path found from {start} to {end}.")
         return None
 
-
+    """Function that selects a random destination from list"""
     def set_destination(self):
         if self.model.destinations:
             self.destination = self.random.choice(self.model.destinations)
-            print(f"Car {self.unique_id} has chosen destination at {self.destination.pos}")
 
     def move(self):
         if not self.destination:
@@ -90,24 +84,20 @@ class Car(Agent):
                 self.waiting = True  # Wait if the next cell is occupied by a car
                 return
         else:
-            self.waiting = True  # Wait if the next move is invalid
+            self.waiting = True 
             return
 
-
+    """Function to check and validate if next posiion aligns with direction"""
     def is_valid_move(self, current_pos, next_pos):
         cell_contents = self.model.grid.get_cell_list_contents(next_pos)
         
-        # Check if the cell contains any Destination agents
         destination_agents = [agent for agent in cell_contents if isinstance(agent, Destination)]
         if destination_agents:
             if self.destination in destination_agents:
-                # Allow movement into the cell if it's the car's own destination
                 return True
             else:
-                # Disallow movement into the cell if the destination is not the car's own
                 return False
 
-        # Proceed to check for Roads and Traffic Lights
         valid_agents = [agent for agent in cell_contents if isinstance(agent, (Road, Traffic_Light))]
         if not valid_agents:
             return False  
@@ -163,25 +153,19 @@ class Destination(Agent):
     def remove_agent(self):
 
         if not self.pos:
-            print(f"Destination {self.unique_id} is not placed on the grid.")
             return
 
         cell_contents = self.model.grid.get_cell_list_contents(self.pos)
-        # print(f"Destination {self.unique_id} at {self.pos}, cell contains: {[type(a) for a in cell_contents]}")
 
         for agent in cell_contents:
             if isinstance(agent, Car) and agent.destination == self:
-                print(f"Car {agent.unique_id} has reached destination {self.unique_id}, removing.")
+                self.model.agentsArrived +=1 #Counter to post stats
                 self.model.grid.remove_agent(agent)  
                 self.model.schedule.remove(agent)  
-                print(f"Car {agent.unique_id} successfully removed.")
 
 
     def step(self):
         self.remove_agent()
-
-
-
 
 class Obstacle(Agent):
     def __init__(self, unique_id, model):
