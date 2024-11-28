@@ -128,7 +128,12 @@ async function initAgentsModel() {
   }
 }
 
+function interpolatePosition(start, end, t) {
+  return start.map((startCoord, i) => startCoord + (end[i] - startCoord) * t);
+}
 let agents = [];
+const interpolationDuration = 1000; // Duración de la interpolación en milisegundos
+
 async function getAgents() {
   try {
     const response = await fetch(agent_server_uri + "getAgents");
@@ -142,9 +147,11 @@ async function getAgents() {
       }
 
       const updatedAgentIds = new Set();
+      const currentTime = Date.now();
 
       for (const agentData of positions) {
         const agentId = agentData.id;
+        const newPosition = [agentData.x, agentData.y, agentData.z];
 
         // Obtener la rotación según el símbolo actual del agente
         const rotation = getRotationFromDirection(agentData.symbol);
@@ -152,22 +159,26 @@ async function getAgents() {
         let agent = agents.find((a) => a.id === agentId);
 
         if (agent) {
-          // Si la posición o el símbolo (y, por ende, la rotación) ha cambiado
           if (
             agent.position[0] !== agentData.x ||
             agent.position[1] !== agentData.y ||
             agent.position[2] !== agentData.z ||
-            agent.symbol !== agentData.symbol // Ahora también verificamos el símbolo
+            agent.symbol !== agentData.symbol
           ) {
-            agent.position = [agentData.x, agentData.y, agentData.z];
-            agent.symbol = agentData.symbol; // Actualizamos el símbolo
-            agent.rotation = rotation; // Actualizamos la rotación
+            agent.startPosition = agent.position; 
+            agent.endPosition = newPosition;      
+            agent.startTime = currentTime;        
+            agent.symbol = agentData.symbol;
+            agent.rotation = rotation;
           }
         } else {
-          // Crear un nuevo agente
+          
           agent = {
             id: agentId,
-            position: [agentData.x, agentData.y, agentData.z],
+            startPosition: newPosition,
+            endPosition: newPosition,
+            position: newPosition,
+            startTime: currentTime,
             rotation: rotation,
             color: [0.0, 1.0, 0.0],
             objPath: "/obj/coche.obj",
@@ -183,9 +194,7 @@ async function getAgents() {
         updatedAgentIds.add(agentId);
       }
 
-      // Eliminar agentes que ya no existen en el servidor
       agents = agents.filter((agent) => updatedAgentIds.has(agent.id));
-      
 
       console.log("Agents updated:", agents);
     } else {
@@ -195,7 +204,18 @@ async function getAgents() {
     console.error("Error in getAgents:", error);
   }
 }
+function updateAgentPositions() {
+  const currentTime = Date.now();
 
+  for (const agent of agents) {
+    if (agent.startPosition && agent.endPosition) {
+      const elapsedTime = currentTime - agent.startTime;
+      const t = Math.min(elapsedTime / interpolationDuration, 1); 
+
+      agent.position = interpolatePosition(agent.startPosition, agent.endPosition, t);
+    }
+  }
+}
 async function update() {
   try {
     const response = await fetch(agent_server_uri + "update");
@@ -205,7 +225,6 @@ async function update() {
 
       await getAgents();
 
-      // Only redraw if there are visible changes
       drawScene();
     } else {
       console.error("Error during model update:", response.statusText);
@@ -325,7 +344,6 @@ async function generateGeometryFromMap(mapData, normals) {
     '/obj/yellowHouse.obj'
   ];
 
-    // Function to get a random building
     function getRandomBuilding() {
       const randomIndex = Math.floor(Math.random() * buildings.length);
       return buildings[randomIndex];
@@ -371,11 +389,9 @@ async function generateGeometryFromMap(mapData, normals) {
               height++;
         }
     
-        // Ignorar bloques que no formen un mínimo de 2x2
         if (width >= 1 && height >= 1) {
-            // Limitar a un tamaño máximo de 4x4
-            const blockWidth = Math.min(width, 8);
-            const blockHeight = Math.min(height, 8);
+          const blockWidth = Math.min(width, 8);
+          const blockHeight = Math.min(height, 8);
     
             const offsetX = x + blockWidth / 2;
             const offsetZ = z + blockHeight / 2;
@@ -546,8 +562,8 @@ async function setupMapFromFile(url) {
 
 function getRotationFromDirection(symbol) {
   switch (symbol) {
-    case 'v': return -Math.PI / 2;
-    case '^': return Math.PI / 2;      
+    case 'v': return Math.PI / 2;
+    case '^': return -Math.PI / 2;      
     case '>': return Math.PI;
     case '<': return 0;
     default: return 0; 
@@ -555,30 +571,53 @@ function getRotationFromDirection(symbol) {
 }
 
 async function drawAgent(agent) {
-  const {  objPath, symbol } = agent;
+  const { objPath, symbol } = agent;
 
-  const objData = await loadObjFromFile(objPath);
-  if (!objData) {
-    console.error(`Error al cargar el modelo para el agente ${agent.id}`);
-    return;
+  try {
+    const objData = await loadObjFromFile(objPath);
+    if (!objData) {
+      console.error(`Error al cargar el modelo para el agente ${agent.id}`);
+      return;
+    }
+
+    const agentGeometry = {
+      a_position: { numComponents: 3, data: new Float32Array(objData.a_position.data) },
+      a_color: { numComponents: 4, data: new Float32Array(objData.a_color.data) },
+      a_normal: { numComponents: 3, data: new Float32Array(objData.a_normal.data) },
+    };
+
+    agent.bufferInfo = twgl.createBufferInfoFromArrays(gl, agentGeometry);
+    agent.loaded = true;
+
+    agent.rotation = getRotationFromDirection(symbol);
+
+    // Cargar material después del modelo
+    if (objData.mtlPath) {
+      loadMtlFromFile(objData.mtlPath)
+        .then((mtlData) => {
+          applyMaterialToAgent(agent, mtlData); // Aplicar el material al agente
+        })
+        .catch((error) => {
+          console.error(`Error al cargar el material para el agente ${agent.id}`, error);
+        });
+    }
+  } catch (error) {
+    console.error(`Error al cargar el agente ${agent.id}:`, error);
   }
+}
 
-  const agentGeometry = {
-    a_position: { numComponents: 3, data: new Float32Array(objData.a_position.data) },
-    a_color: { numComponents: 4, data: new Float32Array(objData.a_color.data) },
-    a_normal: { numComponents: 3, data: new Float32Array(objData.a_normal.data) },
-  };
-
-  agent.bufferInfo = twgl.createBufferInfoFromArrays(gl, agentGeometry);
-  agent.loaded = true;
-
-  agent.rotation = getRotationFromDirection(symbol);
+function applyMaterialToAgent(agent, mtlData) {
+  if (mtlData && agent.bufferInfo) {
+    agent.material = mtlData;
+    console.log(`Material aplicado al agente ${agent.id}`);
+  }
 }
 
 
 
 function drawScene() {
   updateCameraPosition();
+  updateAgentPositions();
 
   twgl.resizeCanvasToDisplaySize(gl.canvas);
   gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
@@ -598,13 +637,11 @@ function drawScene() {
   const viewMatrix = twgl.m4.inverse(cameraMatrix);
   const viewProjectionMatrix = twgl.m4.multiply(projectionMatrix, viewMatrix);
 
-  // Configuración de la luz
-  const lightDirection = [1, 1, 1]; 
-  const ambientLight = [.7, .7, .7, .7]; 
-  const diffuseLight = [1.0, 1.0, 1.0, 1.0]; 
-  const specularLight = [1.0, 1.0, 1.0, 1.0]; 
+  const lightDirection = [1, 1, 1];
+  const ambientLight = [0.7, 0.7, 0.7, 1.0];
+  const diffuseLight = [1.0, 1.0, 1.0, 1.0];
+  const specularLight = [1.0, 1.0, 1.0, 1.0];
 
-  // Dibujar el mapa
   gl.useProgram(programInfo.program);
   twgl.setBuffersAndAttributes(gl, programInfo, mapBufferInfo);
 
@@ -621,7 +658,6 @@ function drawScene() {
 
   twgl.drawBufferInfo(gl, mapBufferInfo);
 
-  // Dibujar agentes
   for (const agent of agents) {
     if (agent.loaded && agent.bufferInfo) {
       gl.useProgram(programInfo.program);
@@ -796,7 +832,6 @@ function loadObj(objContent, mtlContent) {
 function setupUI() {
   const gui = new GUI();
 
-  // Crear una carpeta para la posición de la cámara
   const posFolder = gui.addFolder('Posición de la cámara');
 
   posFolder.add(cameraPosition, 'x', -100, 100).onChange((value) => {
