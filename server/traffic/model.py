@@ -26,7 +26,7 @@ class CityModel(Model):
         self.destinations = []
         self.step_count = 1  # To track the number of steps for periodic agent initialization
         self.agentsArrived = 0
-        self.actualAgents = 0
+        self.actualAgents = 0 #
 
         # Load the map file. The map file is a text file where each character represents an agent.
         with open('../cityMap.txt') as baseFile:
@@ -73,13 +73,13 @@ class CityModel(Model):
             self.schedule.add(car)
 
     def all_cells_filled_by_cars(self):
-        """Verifica si todas las celdas están llenas únicamente por agentes de tipo Car."""
+        """Checks for car agents on cell"""
         for contents, (x, y) in self.grid.coord_iter():
-            # Verifica si la celda está vacía o no contiene ningún agente 'Car'
             if not any(isinstance(agent, Car) for agent in contents):
                 return False
         return True
 
+    """Function to calculate current cars at grid """
     def howManyCars(self):
         self.actualAgents = 0
         for contents, (x,y) in self.grid.coord_iter():
@@ -87,24 +87,21 @@ class CityModel(Model):
                 self.actualAgents += 1
 
     def step(self):
-        """Advance the model by one step."""
         print(f"Agents arrived: {self.agentsArrived}")
         self.step_count += 1
         print(f"Actual agents: {self.actualAgents}")
 
-        # Añadir agentes a las esquinas cada 10 pasos
+        # Add agents to corners each 10 seconds 
         if self.step_count % 10 == 0:
             self.initialize_corner_agents()
 
-        # Avanzar la programación de agentes
         self.schedule.step()
 
         self.howManyCars()
 
-        # Verificar si todas las celdas están llenas por agentes Car
+        """Checks if theres more spaces available or all cells are occupied by car agents"""
         if self.all_cells_filled_by_cars():
-            print(f"Modelo detenido en el paso {self.step_count}: todas las celdas están llenas por agentes Car.")
-            self.running = False  # Detener el modelo
+            self.running = False  # Stop the model
 
 
 

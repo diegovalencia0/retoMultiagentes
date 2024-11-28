@@ -13,7 +13,7 @@ class Car(Agent):
         self.waiting = False  #Variable to comunicate is at red light
         self.destination = None #Destination cell
 
-"""Alorithm to determine the path to destination"""
+    """Alorithm to determine the path to destination"""
     def bfs(self):
         if not self.destination or not self.pos:
             return None
@@ -34,7 +34,7 @@ class Car(Agent):
             if current_pos == end: #When destination is reached return [start]
                 return path
 
-            neighbors = self.model.grid.get_neighborhood(current_pos, moore=True, include_center=False)
+            neighbors = self.model.grid.get_neighborhood(current_pos, moore=True, include_center=False) #Get neiighbors including corners for diagonal move
 
             for neighbor in neighbors:
                 if neighbor in visited:
@@ -52,7 +52,7 @@ class Car(Agent):
                     queue.append((neighbor, path + [neighbor]))
         return None
 
-
+    """Function that selects a random destination from list"""
     def set_destination(self):
         if self.model.destinations:
             self.destination = self.random.choice(self.model.destinations)
@@ -87,7 +87,7 @@ class Car(Agent):
             self.waiting = True 
             return
 
-
+    """Function to check and validate if next posiion aligns with direction"""
     def is_valid_move(self, current_pos, next_pos):
         cell_contents = self.model.grid.get_cell_list_contents(next_pos)
         
@@ -116,7 +116,7 @@ class Car(Agent):
             if direction == "Down" and next_pos[1] < current_pos[1]:
                 return True
 
-        # Allow moveement into cells with Traffic Lights
+        # Allow movement into cells with Traffic Lights
         traffic_light_agents = [agent for agent in valid_agents if isinstance(agent, Traffic_Light)]
         if traffic_light_agents:
             return True
@@ -159,16 +159,13 @@ class Destination(Agent):
 
         for agent in cell_contents:
             if isinstance(agent, Car) and agent.destination == self:
-                self.model.agentsArrived +=1 
+                self.model.agentsArrived +=1 #Counter to post stats
                 self.model.grid.remove_agent(agent)  
                 self.model.schedule.remove(agent)  
 
 
     def step(self):
         self.remove_agent()
-
-
-
 
 class Obstacle(Agent):
     def __init__(self, unique_id, model):
