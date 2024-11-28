@@ -183,7 +183,7 @@ async function main() {
 
   programInfo = twgl.createProgramInfo(gl, [vsGLSL, fsGLSL]);
 
-  cameraPosition = { x: 10, y: 10, z: 0 };
+  cameraPosition = { x: 15, y: 50, z: 28 };
   target = [0, 0, 0];
 
   setupKeyboardControls();
