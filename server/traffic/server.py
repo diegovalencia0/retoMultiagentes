@@ -49,7 +49,6 @@ with open('../cityMap.txt') as baseFile:
 
 model_params = {"N":1}
 
-print(width, height)
 grid = CanvasGrid(agent_portrayal, width, height, 500, 500)
 
 server = ModularServer(CityModel, [grid], "Traffic Base", model_params)
