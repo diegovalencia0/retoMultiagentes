@@ -63,6 +63,7 @@ class Car(Agent):
             self.destination = self.random.choice(self.model.destinations)
             print(f"Car {self.unique_id} has chosen destination at {self.destination.pos}")
 
+
     def move(self):
         if not self.destination:
             return
@@ -90,24 +91,20 @@ class Car(Agent):
                 self.waiting = True  # Wait if the next cell is occupied by a car
                 return
         else:
-            self.waiting = True  # Wait if the next move is invalid
+            self.waiting = True 
             return
 
 
     def is_valid_move(self, current_pos, next_pos):
         cell_contents = self.model.grid.get_cell_list_contents(next_pos)
         
-        # Check if the cell contains any Destination agents
         destination_agents = [agent for agent in cell_contents if isinstance(agent, Destination)]
         if destination_agents:
             if self.destination in destination_agents:
-                # Allow movement into the cell if it's the car's own destination
                 return True
             else:
-                # Disallow movement into the cell if the destination is not the car's own
                 return False
 
-        # Proceed to check for Roads and Traffic Lights
         valid_agents = [agent for agent in cell_contents if isinstance(agent, (Road, Traffic_Light))]
         if not valid_agents:
             return False  
@@ -126,7 +123,7 @@ class Car(Agent):
             if direction == "Down" and next_pos[1] < current_pos[1]:
                 return True
 
-        # Allow movement into cells with Traffic Lights
+        # Allow moveement into cells with Traffic Lights
         traffic_light_agents = [agent for agent in valid_agents if isinstance(agent, Traffic_Light)]
         if traffic_light_agents:
             return True
