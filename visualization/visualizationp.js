@@ -176,11 +176,6 @@ async function update() {
   }
 }
 
-
-
-
-
-
 async function main() {
   canvas = document.querySelector("canvas");
   gl = canvas.getContext("webgl2");
@@ -279,13 +274,26 @@ async function loadMapFromFile(url) {
 }
 
 
+
 async function generateGeometryFromMap(mapData) {
   const positions = [];
   const colors = [];
-  
+  const buildings = [
+    '/obj/greenHouse.obj',
+    '/obj/pinkHouse.obj',
+    '/obj/orangeHouse.obj',
+    '/obj/purpleHouse.obj',
+    '/obj/yellowHouse.obj'
+  ];
+
+  // Function to get a random building
+  function getRandomBuilding() {
+    const randomIndex = Math.floor(Math.random() * buildings.length);
+    return buildings[randomIndex];
+  }
 
   const objects = {
-    "#": { path: "/obj/edificio2.obj" },
+    "#": { get path() { return getRandomBuilding(); } },
     "S": { path: "/obj/semaforo.obj" },
     "v": { path: "/obj/cubo.obj" },
     "<": { path: "/obj/cuboi.obj" },
@@ -325,10 +333,10 @@ async function generateGeometryFromMap(mapData) {
         }
     
         // Ignorar bloques que no formen un mínimo de 2x2
-        if (width >= 2 && height >= 2) {
+        if (width >= 1 && height >= 1) {
             // Limitar a un tamaño máximo de 4x4
-            const blockWidth = Math.min(width, 4);
-            const blockHeight = Math.min(height, 4);
+            const blockWidth = Math.min(width, 8);
+            const blockHeight = Math.min(height, 8);
     
             const offsetX = x + blockWidth / 2;
             const offsetZ = z + blockHeight / 2;
@@ -410,7 +418,7 @@ async function generateGeometryFromMap(mapData) {
           colors.push(...objDataTrafficLight.a_color.data);
         }
 
-        const objDataCube = await loadObjFromFile(objects["N"].path);
+        const objDataCube = await loadObjFromFile(objects["O"].path);
         if (objDataCube) {
           for (let i = 0; i < objDataCube.a_position.data.length; i += 3) {
             positions.push(

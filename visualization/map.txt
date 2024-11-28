@@ -1,5 +1,5 @@
-O<<<<<<<<<<<<<<<<s<<<<<<<<<<<O
-vOOOOOOOOOOOOOOOOsOOOOOOOOOOOO
+O<<<<<<<<<<<<<<<<S<<<<<<<<<<<O
+vOOOOOOOOOOOOOOOOSOOOOOOOOOOOO
 vO##O###O###vO#SS###########^O
 vO##O###O###vO#^O<<<<<<<<<<<^O
 vOOOOOOOOOOOvO#^OOOOOOOOOOOO^O
@@ -9,13 +9,13 @@ vOOOOOOOOO<vO#^OOOOOOOOOOOOO^O
 vO##O#####O#vO#^O####vO#####^O
 vO>>>>>>>>O>vO#^O####vO#####^O
 vO##S#####O#vO#^O####SS#####^O
-vO<<<s<<<<<<<<<<<<<<<<<s<<<<^O
-vOOOOsOOOOOOOOOOOOOOOOOsOOOO^O
+vO<<<S<<<<<<<<<<<<<<<<<S<<<<^O
+vOOOOSOOOOOOOOOOOOOOOOOSOOOO^O
 vO#########vO###^O##########^O
 vO#########vO###^O##########^O
 vO#########vO###^O##########^O
-vO>>>s>>>>>>>>>>>>>>>>>>>>>s^O
-vOOOOsOOOOOOOOOOOOOOOOOOOOOs^O
+vO>>>S>>>>>>>>>>>>>>>>>>>>>S^O
+vOOOOSOOOOOOOOOOOOOOOOOOOOOS^O
 vO#vO#SS####vO#^O####vO#####SS
 vO#vO#^O####vO#^O####vO#####^O
 vO#vO#^O####vO#^O####vO#####^O
@@ -26,5 +26,5 @@ vO#vO#^O####vO#^O####vO#####^O
 vO#vO#^O####vO#^O####vO#####^O
 vO#vO#^O####vO#^O####vO#####^O
 vO#vO#^O####SS#^O####SS#####^O
-v>>>>>>>>>>s>>>>>>>>s>>>>>>>^O
-OOOOOOOOOOOsOOOOOOOOsOOOOOOOOO
+v>>>>>>>>>>S>>>>>>>>S>>>>>>>^O
+OOOOOOOOOOOSOOOOOOOOSOOOOOOOOO

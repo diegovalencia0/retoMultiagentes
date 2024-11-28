@@ -12,18 +12,12 @@ class Car(Agent):
 
     def bfs(self):
         if not self.destination or not self.pos:
-            print(f"BFS Error: No destination or position set. Destination: {self.destination}, Position: {self.pos}")
             return None
 
         start = self.pos
         end = self.destination.pos
 
-        print(f"BFS Start: {start}, End: {end}")
-
-        # print(f"Destination contents: {self.model.grid.get_cell_list_contents(end)}")
-
         if start == end:
-            print("Agent already at the destination.")
             return [start]
 
         queue = deque([(start, [start])])
@@ -34,7 +28,6 @@ class Car(Agent):
             current_pos, path = queue.popleft()
 
             if current_pos == end:
-                print(f"BFS: Path to destination found: {path}")
                 return path
 
             neighbors = self.model.grid.get_neighborhood(current_pos, moore=True, include_center=False)
@@ -53,16 +46,12 @@ class Car(Agent):
                 if not occupied_by_car:
                     visited.add(neighbor)
                     queue.append((neighbor, path + [neighbor]))
-
-        print(f"BFS: No path found from {start} to {end}.")
         return None
 
 
     def set_destination(self):
         if self.model.destinations:
             self.destination = self.random.choice(self.model.destinations)
-            print(f"Car {self.unique_id} has chosen destination at {self.destination.pos}")
-
 
     def move(self):
         if not self.destination:
@@ -160,18 +149,14 @@ class Destination(Agent):
     def remove_agent(self):
 
         if not self.pos:
-            print(f"Destination {self.unique_id} is not placed on the grid.")
             return
 
         cell_contents = self.model.grid.get_cell_list_contents(self.pos)
-        # print(f"Destination {self.unique_id} at {self.pos}, cell contains: {[type(a) for a in cell_contents]}")
 
         for agent in cell_contents:
             if isinstance(agent, Car) and agent.destination == self:
-                print(f"Car {agent.unique_id} has reached destination {self.unique_id}, removing.")
                 self.model.grid.remove_agent(agent)  
                 self.model.schedule.remove(agent)  
-                print(f"Car {agent.unique_id} successfully removed.")
 
 
     def step(self):
